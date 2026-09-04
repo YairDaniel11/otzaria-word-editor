@@ -14,9 +14,11 @@ import {
   createMemoryStorage,
   type MacroHost,
   type MacroOutcome,
+  type VbaModule,
 } from 'superdoc-macros';
 import MacrosDialog from '../../src/ui/panels/MacrosDialog.vue';
 import type { MacrosHandle } from '../../src/engine/macros';
+import { NO_VBA, WARNING_TEXT, type DocumentVba } from '../../src/engine/vba-import';
 import { autoUnmount, mountUi, settle } from './harness';
 
 autoUnmount();
@@ -129,6 +131,50 @@ describe('MacrosDialog', () => {
     await buttonByText('מחק').trigger('click');
     await settle();
     expect(handle.kit.listSnippets()).toHaveLength(0);
+  });
+
+  it('כלים מובנים: הלשונית מופיעה רק כשנרשמו, הרצה וקיצור עובדים מול ה-kit', async () => {
+    const { handle } = createHandle();
+    let ran = 0;
+    handle.kit.registerTool({
+      id: 'shulchan.demo',
+      name: 'כלי הדגמה',
+      description: 'תיאור הכלי',
+      run: () => {
+        ran += 1;
+        return { ok: true };
+      },
+    });
+    mountUi(MacrosDialog, { props: { isOpen: true, handle } });
+    await settle();
+    await switchTab('כלים');
+
+    const item = dialog()
+      .findAll('.md-list-item')
+      .find((candidate) => candidate.text().includes('כלי הדגמה'));
+    expect(item).toBeDefined();
+    await item!.trigger('click');
+    await settle();
+    expect(dialog().text()).toContain('תיאור הכלי');
+
+    await buttonByText('הרץ').trigger('click');
+    await settle();
+    expect(ran).toBe(1);
+
+    await dialog().find('#md-tool-shortcut').setValue('Ctrl+Alt+5');
+    await buttonByText('שמור קיצור').trigger('click');
+    await settle();
+    expect(handle.kit.listTools()[0]?.shortcut).toBe('Ctrl+Alt+5');
+  });
+
+  it('בלי כלים רשומים — אין לשונית „כלים”', async () => {
+    const { handle } = createHandle();
+    mountUi(MacrosDialog, { props: { isOpen: true, handle } });
+    await settle();
+    const titles = dialog()
+      .findAll('[role="tab"]')
+      .map((tab) => tab.text());
+    expect(titles).not.toContain('כלים');
   });
 
   it('לשונית הסקריפטים מוסתרת כשהדגל כבוי', async () => {
@@ -248,5 +294,118 @@ describe('MacrosDialog', () => {
     await buttonByText('ייבא מכאן').trigger('click');
     await settle();
     expect(handle.kit.listSnippets()).toHaveLength(1);
+  });
+});
+
+/**
+ * לשונית „VBA במסמך”.
+ *
+ * מה שנבדק כאן הוא בעיקר מה ש**אינו** קורה: אין כפתור שמריץ, אין כפתור
+ * שמייבא לתוך ה-kit, והקוד מוצג בתיבה לקריאה בלבד. זו לשונית שמתארת את הקובץ
+ * שנפתח, לא יכולת של העורך.
+ */
+describe('MacrosDialog — VBA שבמסמך', () => {
+  const vbaModule = (
+    name: string,
+    source: string,
+    kind: VbaModule['kind'] = 'standard',
+  ): VbaModule => ({ name, kind, source, truncated: false });
+
+  const withModules = (overrides: Partial<DocumentVba> = {}): DocumentVba => ({
+    hasMacroPart: true,
+    modules: [
+      vbaModule('Module1', 'Sub AutoOpen()\r\n    MsgBox "שלום"\r\nEnd Sub'),
+      vbaModule('ThisDocument', 'Attribute VB_Name = "ThisDocument"', 'document'),
+    ],
+    autoRun: ['Module1.AutoOpen'],
+    warnings: [WARNING_TEXT['auto-run-macros']],
+    status: 'במסמך יש מאקרו',
+    unreadable: false,
+    ...overrides,
+  });
+
+  it('הלשונית אינה קיימת במסמך בלי מאקרו', async () => {
+    const { handle } = createHandle();
+    mountUi(MacrosDialog, { props: { isOpen: true, handle, documentVba: NO_VBA } });
+    await settle();
+
+    // לשונית ריקה על מסמך רגיל הייתה רק מבלבלת.
+    const titles = dialog()
+      .findAll('[role="tab"]')
+      .map((tab) => tab.text());
+    expect(titles).not.toContain('VBA במסמך');
+  });
+
+  it('מציגה את קוד המודול, לקריאה בלבד', async () => {
+    const { handle } = createHandle();
+    mountUi(MacrosDialog, { props: { isOpen: true, handle, documentVba: withModules() } });
+    await settle();
+    await switchTab('VBA במסמך');
+
+    const source = dialog().find('#md-vba-source').element as HTMLTextAreaElement;
+    expect(source.value).toContain('Sub AutoOpen()');
+    // קריאה בלבד: הקוד הזה הגיע מקובץ חיצוני, ואין שום מסלול שעורך או מריץ
+    // אותו כאן.
+    expect(source.readOnly).toBe(true);
+  });
+
+  it('אומרת במפורש שהמאקרו אינם מורצים, ומזהירה על הרצה אוטומטית', async () => {
+    const { handle } = createHandle();
+    mountUi(MacrosDialog, { props: { isOpen: true, handle, documentVba: withModules() } });
+    await settle();
+    await switchTab('VBA במסמך');
+
+    const text = dialog().text();
+    expect(text).toContain('אינם מורצים כאן');
+    // האזהרה הביטחונית: Word מריץ `AutoOpen` מעצמו, וכאן לא.
+    expect(text).toContain(WARNING_TEXT['auto-run-macros']);
+  });
+
+  it('מחליפה מודול לפי הבחירה', async () => {
+    const { handle } = createHandle();
+    mountUi(MacrosDialog, { props: { isOpen: true, handle, documentVba: withModules() } });
+    await settle();
+    await switchTab('VBA במסמך');
+
+    await dialog().find('#md-vba-module').setValue('ThisDocument');
+    await settle();
+
+    const source = dialog().find('#md-vba-source').element as HTMLTextAreaElement;
+    expect(source.value).toContain('VB_Name = "ThisDocument"');
+  });
+
+  it('חלק מאקרו שלא נקרא — הלשונית קיימת ומסבירה', async () => {
+    const { handle } = createHandle();
+    const unreadable: DocumentVba = {
+      hasMacroPart: true,
+      modules: [],
+      autoRun: [],
+      warnings: ['במסמך יש מאקרו, אבל פרויקט המאקרו אינו קריא.'],
+      status: null,
+      unreadable: true,
+    };
+
+    mountUi(MacrosDialog, { props: { isOpen: true, handle, documentVba: unreadable } });
+    await settle();
+    await switchTab('VBA במסמך');
+
+    // הלשונית קיימת דווקא כאן: זה המצב שבו למשתמש הכי חשוב לדעת שהקובץ שלו
+    // נושא מאקרו — הם נשמרים, גם אם אי אפשר להראות אותם.
+    expect(dialog().text()).toContain('אינו קריא');
+    expect(dialog().find('#md-vba-source').exists()).toBe(false);
+  });
+
+  it('אין בלשונית שום כפתור שמריץ או מייבא', async () => {
+    const { handle } = createHandle();
+    mountUi(MacrosDialog, { props: { isOpen: true, handle, documentVba: withModules() } });
+    await settle();
+    await switchTab('VBA במסמך');
+
+    const labels = dialog()
+      .findAll('.md-footer button')
+      .map((button) => button.text());
+    // „סגור” בלבד. כל כפתור אחר כאן היה הופך טקסט מקובץ חיצוני למשהו שקורה.
+    expect(labels.filter((label) => label !== 'סגור')).toEqual([]);
+    expect(handle.kit.listScripts()).toEqual([]);
   });
 });

@@ -37,10 +37,15 @@ function setup() {
   const container = document.createElement('div');
   document.body.replaceChildren(container);
 
-  const opens: Array<{ host: HTMLElement; source?: unknown; deferred: Deferred }> = [];
-  const swap = createEditorSwap(container, (host, source) => {
+  const opens: Array<{
+    host: HTMLElement;
+    source?: unknown;
+    signal?: AbortSignal;
+    deferred: Deferred;
+  }> = [];
+  const swap = createEditorSwap(container, (host, source, signal) => {
     const d = deferred();
-    opens.push({ host, source, deferred: d });
+    opens.push({ host, source, signal, deferred: d });
     return d.promise;
   });
 
@@ -241,6 +246,130 @@ describe('createEditorSwap', () => {
   });
 
   /**
+   * „דלג” בשורת המצב (sessions/document-load.ts, ui/shell/StatusBar.vue).
+   *
+   * מה שנמדד כאן הוא לא „הפתיחה נעצרה” — היא לא נעצרת, המנוע כבר בונה —
+   * אלא שלושת הדברים שבלעדיהם „דלג” הוא הסתרה של הפס ולא ביטול:
+   * המסמך הפעיל אינו נגע, האיתות מורם כדי שהמנוע יפורק, והתוצאה נבלעת
+   * כ-superseded ולא מדווחת למשתמש כשגיאה.
+   */
+  describe('cancel', () => {
+    it('מוסר את ה-signal של הניסיון לפותח', () => {
+      const { opens, swap } = setup();
+      void swap.open('a.docx');
+
+      expect(opens[0].signal).toBeInstanceOf(AbortSignal);
+      expect(opens[0].signal?.aborted).toBe(false);
+    });
+
+    it('מרים את האיתות — זה מה שמפרק את המנוע החצי-בנוי', () => {
+      const { opens, swap } = setup();
+      void swap.open('a.docx');
+
+      expect(swap.cancel()).toBe(true);
+
+      // בלי זה „דלג” היה מסתיר את הפס בזמן שהמכונה ממשיכה לבנות מסמך שנזנח.
+      expect(opens[0].signal?.aborted).toBe(true);
+    });
+
+    it('מסיר מיד את ה-host של הפתיחה שנזנחה', () => {
+      const { container, swap } = setup();
+      void swap.open('a.docx');
+      expect(hosts(container)).toHaveLength(1);
+
+      swap.cancel();
+
+      expect(hosts(container)).toHaveLength(0);
+      expect(swap.isOpening).toBe(true);
+    });
+
+    it('מסמך פעיל נשאר פעיל בדיוק כפי שהיה', async () => {
+      const { container, opens, swap } = setup();
+      const first = fakeSession('a');
+      const firstOpen = swap.open('a.docx');
+      opens[0].deferred.resolve(first);
+      await firstOpen;
+
+      const cancelled = swap.open('b.docx');
+      swap.cancel();
+      opens[1].deferred.reject(new Error('פתיחת המסמך בוטלה'));
+
+      // superseded ולא failed: אין שגיאה שתגיע לשורת המצב על פעולה שהמשתמש
+      // עצמו ביקש.
+      await expect(cancelled).resolves.toEqual({ status: 'superseded' });
+      expect(swap.current).toBe(first);
+      expect(first.destroy).not.toHaveBeenCalled();
+      expect(hosts(container)).toHaveLength(1);
+      expect(swap.documentGeneration).toBe(1);
+    });
+
+    it('פתיחה שבוטלה אך הצליחה בכל זאת מפרקת את עצמה', async () => {
+      const { container, opens, swap } = setup();
+      const inFlight = swap.open('a.docx');
+      swap.cancel();
+
+      // מנוע שאינו מכבד את האיתות, או שסיים בדיוק באותו רגע. המועמד אינו
+      // מתיישב על המסך והוא זה שמפרק את עצמו.
+      const late = fakeSession('late');
+      opens[0].deferred.resolve(late);
+
+      await expect(inFlight).resolves.toEqual({ status: 'superseded' });
+      expect(late.destroy).toHaveBeenCalledTimes(1);
+      expect(swap.current).toBeNull();
+      expect(swap.documentGeneration).toBe(0);
+      expect(hosts(container)).toHaveLength(0);
+    });
+
+    it('בלי פתיחה בדרך אינו מדווח שביטל', async () => {
+      const { opens, swap } = setup();
+      expect(swap.cancel()).toBe(false);
+
+      const open = swap.open('a.docx');
+      opens[0].deferred.resolve(fakeSession('a'));
+      await open;
+
+      // הפתיחה נגמרה: אין מה לבטל, וגם לא את המסמך שנפתח.
+      expect(swap.cancel()).toBe(false);
+      expect(swap.current).not.toBeNull();
+    });
+
+    it('מבטל את כל מה שבדרך, גם שתי פתיחות שמתרוצצות', () => {
+      const { container, opens, swap } = setup();
+      void swap.open('a.docx');
+      void swap.open('b.docx');
+
+      expect(swap.cancel()).toBe(true);
+
+      expect(opens[0].signal?.aborted).toBe(true);
+      expect(opens[1].signal?.aborted).toBe(true);
+      expect(hosts(container)).toHaveLength(0);
+    });
+
+    it('אחרי ביטול אפשר לפתוח שוב', async () => {
+      const { container, opens, swap } = setup();
+      void swap.open('a.docx');
+      swap.cancel();
+
+      const again = swap.open('a.docx');
+      const session = fakeSession('a');
+      opens[1].deferred.resolve(session);
+
+      await expect(again).resolves.toEqual({ status: 'opened', session });
+      expect(swap.current).toBe(session);
+      expect(hosts(container)).toHaveLength(1);
+    });
+
+    it('destroy מרים את האיתות של פתיחה שבדרך', () => {
+      const { opens, swap } = setup();
+      void swap.open('a.docx');
+
+      swap.destroy();
+
+      expect(opens[0].signal?.aborted).toBe(true);
+    });
+  });
+
+  /**
    * ממצא QA (engine/page-break.ts, „QA עצמאי”): `PageBreakTracker.syncDocument`
    * הוחלפה מהשוואת זהות `host` להשוואת `documentGeneration` — מונה מפורש
    * שאינו נשען על התנהגות לא-מתועדת של `SuperDoc`. הבדיקות כאן על המונה עצמו:
@@ -317,5 +446,49 @@ describe('createEditorSwap', () => {
 
       expect(first).toBe(second);
     });
+  });
+});
+
+describe('close', () => {
+  it('משחררת את המסמך הפתוח ומשאירה את ה-swap מוכן לפתיחה חדשה', async () => {
+    // זהו החוזה של „טאב נרדם” (App.vue, `sleepTab`): המנוע משוחרר, והטאב
+    // נפתח שוב מהרשומה שלו כשחוזרים אליו. בלי הבדיקה הזאת „close” ו„destroy”
+    // היו יכולים להיפרד בהתנהגות בלי שאיש ישים לב.
+    const { container, opens, swap } = setup();
+    const first = fakeSession('a');
+    const firstOpen = swap.open('a.docx');
+    opens[0].deferred.resolve(first);
+    await firstOpen;
+
+    swap.close();
+
+    expect(swap.current, 'המסמך שוחרר').toBeNull();
+    expect(first.destroy, 'והמנוע שלו פורק').toHaveBeenCalled();
+    expect(hosts(container), 'וה-host שלו הוסר').toHaveLength(0);
+
+    const second = fakeSession('b');
+    const secondOpen = swap.open('b.docx');
+    opens[1].deferred.resolve(second);
+
+    await expect(secondOpen).resolves.toEqual({ status: 'opened', session: second });
+    expect(swap.current, 'פתיחה חדשה על אותו container עובדת').toBe(second);
+    expect(hosts(container)).toHaveLength(1);
+  });
+
+  it('`destroy` הוא סופי — ורק בזה הוא נבדל מ-`close`', async () => {
+    // בלי הנעילה השתיים היו אותו קוד בדיוק, וההבחנה ביניהן הערה בלבד.
+    const { container, opens, swap } = setup();
+    const first = fakeSession('a');
+    const firstOpen = swap.open('a.docx');
+    opens[0].deferred.resolve(first);
+    await firstOpen;
+
+    swap.destroy();
+    const after = await swap.open('b.docx');
+
+    expect(after).toEqual({ status: 'superseded' });
+    expect(opens, 'לא נבנה מנוע לתוך container שכבר אינו במסמך').toHaveLength(1);
+    expect(hosts(container)).toHaveLength(0);
+    expect(swap.current).toBeNull();
   });
 });

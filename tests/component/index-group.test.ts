@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest';
 import { DOMWrapper } from '@vue/test-utils';
 import ReferencesTab from '../../src/ui/ribbon/tabs/ReferencesTab.vue';
-import { autoUnmount, createSuperdocDouble, mountUi, settle, type Harness } from './harness';
+import { autoUnmount, createSuperdocDouble, mountUi, settle, tipMessage, type Harness } from './harness';
 
 autoUnmount();
 
@@ -89,7 +89,7 @@ describe('„עדכן מפתח”', () => {
     const harness = mountUi(ReferencesTab);
     await settle();
 
-    expect(button(harness, 'עדכן מפתח').attributes('title')).toBe('אין במסמך מפתח לעדכן');
+    expect(tipMessage(button(harness, 'עדכן מפתח'))).toBe('אין במסמך מפתח לעדכן');
 
     await button(harness, 'עדכן מפתח').trigger('click');
     await settle();
@@ -269,7 +269,7 @@ describe('זמינות', () => {
 
     const mark = button(harness, 'סמן ערך למפתח');
     expect(mark.attributes('disabled')).toBeDefined();
-    expect(mark.attributes('title')).toBe('הפעולה אינה זמינה בגרסה הזאת של המנוע');
+    expect(tipMessage(mark)).toBe('הפעולה אינה זמינה בגרסה הזאת של המנוע');
 
     // ושאר הקבוצה נשארת פעילה — פקד מנוטרל אינו מוריד את שכניו.
     expect(button(harness, 'עדכן מפתח').attributes('disabled')).toBeUndefined();

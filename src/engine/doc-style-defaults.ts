@@ -94,6 +94,23 @@ function docOf(host: DocDefaultsTarget): DocDefaultsDocumentApi | null {
  * קוראת את גודל ברירת המחדל הנוכחי, דרך dryRun — הקריאה היחידה שיש.
  * מחזירה נקודות, או `null` כשהמנוע אינו יכול לענות (לא כשל: דיאלוג נפתח
  * על שדה ריק).
+ *
+ * ## למה `fontSizeCs` קודם, ולא `fontSize`
+ *
+ * הכתיבה (`applyDocStyleDefaults`) מציבה את שני הערוצים באותו ערך, אבל
+ * **המסמך שנקרא לא בהכרח נכתב כאן**: מסמך שהגיע מ-Word יכול להחזיק
+ * `w:sz="22"` (לטיני, ‏11 נק') לצד `w:szCs="32"` (עברי, ‏16 נק') — צירוף
+ * שכיח בספרי קודש, שבהם הגוף העברי גדול והלועזי קטן.
+ *
+ * הקריאה שהייתה כאן החזירה את `fontSize` בלבד, כלומר 11, והדיאלוג הציג
+ * אותו כ„גודל ברירת המחדל”. מי שביקש לתקן את הלטיני והקליד 12 היה **מקטין
+ * את כל העברית מ-16 ל-12** — שינוי שלא ביקש, על מספר שלא ראה. לפני שהכתיבה
+ * הפכה לדו-ערוצית זה לא יכול היה לקרות, מפני ש-`szCs` לא נגע כלל; מרגע
+ * שהיא נכתבת, הקריאה חייבת להדביק אותה.
+ *
+ * לכן `fontSizeCs` הוא המדווח: זהו עורך עברי, והמספר שהמשתמש רואה חייב
+ * להיות זה שחל על הטקסט שהוא כותב. `fontSize` נשאר כנפילה למסמך שאין בו
+ * `szCs` כלל.
  */
 export async function readDefaultFontSizePt(host: DocDefaultsTarget): Promise<number | null> {
   const apply = docOf(host)?.styles?.apply;
@@ -102,15 +119,23 @@ export async function readDefaultFontSizePt(host: DocDefaultsTarget): Promise<nu
   let receipt: StyleApplyReceipt;
   try {
     receipt = await apply(
-      { target: { scope: 'docDefaults', channel: 'run' }, patch: { fontSize: 0 } },
+      // **שני הערוצים בבקשה**, לא רק אחד: ה-`before` שחוזר מתאר את השדות
+      // שנשלחו, ולכן בקשה על `fontSize` בלבד לא הייתה מחזירה `fontSizeCs`
+      // אף פעם — והנפילה שמתחת הייתה נבלעת תמיד, כלומר התיקון היה מדומה.
+      {
+        target: { scope: 'docDefaults', channel: 'run' },
+        patch: { fontSize: 0, fontSizeCs: 0 },
+      },
       { dryRun: true },
     );
   } catch {
     return null;
   }
 
-  const before = receipt?.before?.fontSize;
-  return typeof before === 'number' ? halfPointsToPoints(before) : null;
+  const cs = receipt?.before?.fontSizeCs;
+  if (typeof cs === 'number') return halfPointsToPoints(cs);
+  const ascii = receipt?.before?.fontSize;
+  return typeof ascii === 'number' ? halfPointsToPoints(ascii) : null;
 }
 
 /**
@@ -143,6 +168,24 @@ export async function applyDocStyleDefaults(
       return { ok: false, message: `${failedAction}: הגודל חייב להיות בין 0.5 ל-800 נקודות`, reason: 'invalid-font-size' };
     }
     inline.fontSize = halfPoints;
+    /*
+     * `fontSizeCs` לצד `fontSize`, אחרת הגודל אינו חל על עברית בכלל.
+     *
+     * `fontSize` הוא `w:sz` והוא חל על טקסט לטיני; טקסט עברי הוא complex
+     * script ונצבע לפי `w:szCs`. המסמך הריק של המנוע נושא את **שניהם**
+     * ב-docDefaults (‏`w:sz="24"` ו-`w:szCs="24"`), ולכן כתיבה של `sz`
+     * לבדו משאירה את העברית על 12 נקודות בעוד המשתמש ביקש 14 — שינוי
+     * שנראה כאילו לא קרה.
+     *
+     * זו הייתה אסימומטריה בת שדה אחד: ערוץ המשפחה שמעל כבר כותב
+     * `{ ascii, hAnsi, cs }` ומכסה את שלושת הערוצים. `fontSizeCs` הוא
+     * `runAttribute('fontSizeCs', 'number', 'w:szCs')` בחוזה של המנוע.
+     *
+     * ערך אחד לשניהם, ולא שדה נפרד בממשק: „גודל ברירת המחדל” הוא מספר אחד
+     * מבחינת מי שיושב מול המסך, והפרדה בין שני הערוצים היא בדיוק סוג
+     * ההגדרה שמייצרת מסמך שנראה שבור בלי שאיש יודע למה.
+     */
+    inline.fontSizeCs = halfPoints;
   }
 
   if (Object.keys(inline).length === 0) {

@@ -17,6 +17,7 @@ import { alignmentPayload, lineHeightPayload, stylePayload } from '../../engine/
 /** החלוקה שלפיה דיאלוג „קיצורי מקלדת” מקבץ את הרשומות. */
 export type ShortcutGroup =
   | 'file'
+  | 'tabs'
   | 'clipboard'
   | 'edit'
   | 'font'
@@ -31,6 +32,7 @@ export type ShortcutGroup =
 
 export const SHORTCUT_GROUP_TITLES: Record<ShortcutGroup, string> = {
   file: 'קבצים',
+  tabs: 'טאבים',
   clipboard: 'לוח',
   edit: 'עריכה',
   font: 'עיצוב תו',
@@ -77,9 +79,17 @@ export type ShellAction =
   | 'macro-play'
   | 'macro-manage'
   | 'shortcuts-help'
+  | 'tab-new'
+  | 'tab-close'
+  | 'tab-reopen'
+  | 'tab-next'
+  | 'tab-prev'
+  | 'tab-goto'
+  | 'tab-goto-last'
   | 'context-menu'
   | 'focus-next-region'
-  | 'focus-prev-region';
+  | 'focus-prev-region'
+  | 'tell-me';
 
 export interface Shortcut {
   /** מזהה יציב. משמש את הרצועה, את הבדיקות ואת דיאלוג העזרה. */
@@ -119,7 +129,14 @@ export interface Shortcut {
 
   /** פקודת מנוע. */
   command?: CommandId;
-  /** payload לפקודה, כשהיא דורשת אחד. */
+  /**
+   * payload לפקודה או לפעולה, כשהיא דורשת אחד.
+   *
+   * גם לפעולה, ולא רק לפקודה: `tab-goto` היא פעולה אחת עם שמונה רשומות
+   * שנבדלות במספר בלבד (`Alt+1`…`Alt+8`), ושמונה שמות פעולה נפרדים היו
+   * שמונה ענפים זהים ב-`actions.ts` ובכל אתר חיווט — בלי שום הבדל התנהגותי
+   * ביניהם.
+   */
   payload?: unknown;
   /** פעולת מעטפת. */
   action?: ShellAction;
@@ -207,6 +224,253 @@ export const SHORTCUTS = [
     code: 'KeyP',
     ctrl: true,
     action: 'print',
+  },
+  /**
+   * ## הטאבים
+   *
+   * הצירופים הם אלה של הדפדפן ושל VSCode, ולא המצאה: מי שיש לו כמה מסמכים
+   * פתוחים כבר יודע `Ctrl+T`, `Ctrl+W` ו-`Ctrl+Tab` מכל תוכנה אחרת, וכל
+   * סטייה מהם היא קיצור שצריך ללמוד מחדש.
+   *
+   * **`Ctrl+1`…`Ctrl+9` — הצירוף המקובל למעבר לטאב מספר N — אינו זמין כאן.**
+   * `Ctrl+1`, `Ctrl+2` ו-`Ctrl+5` הם ריווח השורות של Word, והם קדמו לטאבים
+   * גם במסמך הזה וגם אצל המשתמש. מסמך שהריווח שלו משתנה בכל מעבר טאב הוא
+   * נזק שקט; טאב שנפתח בצירוף אחר הוא רק צירוף אחר. לכן המעבר הישיר יושב על
+   * `Alt+1`…`Alt+8` — השכבה השנייה שדפדפנים עצמם משתמשים בה לאותה מטרה
+   * (Firefox ב-Linux).
+   *
+   * **`Alt` אינו פנוי כאן, ושורת הספרות שלו כן.** שתי רשומות אחרות כבר
+   * משתמשות בו — `macro-manage` (`Alt+F8`) ו-`tell-me` (`Alt+Q`) — ומי
+   * שמוסיף רשומת `Alt` חדשה חייב להצליב מולן ולא להניח „הכל פנוי”. מה
+   * שנבדק לפני הבחירה הוא צר יותר: אף אחת משתיהן אינה על ספרה, ואין ברצועה
+   * מקשי גישה (KeyTips) שהיו תופסים את שורת הספרות בשלמותה.
+   *
+   * `Digit1`…`Digit8` בלבד, **בלי** `Numpad1`…`Numpad8`: ב-Windows
+   * `Alt`+ספרה בלוח הספרות היא הזנת תו לפי קוד (Alt-code), ורשומה שתופסת
+   * אותה הייתה גוזלת דרך הקלדה קיימת של תווים.
+   *
+   * `Alt+9` הוא **הטאב האחרון** ולא „טאב מספר 9”, בדיוק כמו `Ctrl+9`
+   * בדפדפנים — ולכן פעולה נפרדת ולא `payload: 9`.
+   *
+   * לכל כיוון מעבר יש שלושה צירופים, וזה מכוון: `Ctrl+Tab` הוא של הדפדפן,
+   * `Ctrl+Page Down` הוא של VSCode ושל הדפדפן כאחד, ו-`Ctrl+F6` הוא של Word
+   * („החלון הבא”) — כלומר שלוש קהילות משתמשים שונות, ולכל אחת מהן הצירוף
+   * שהאצבעות שלה כבר יודעות. שלושתם פנויים: `Ctrl+Page Up/Down` של Word הוא
+   * „העמוד הקודם/הבא”, תכונה שאינה קיימת כאן, ו-`F6` בלי `Ctrl` הוא מעבר בין
+   * אזורי הממשק — צירוף אחר לגמרי, ראו `focus-next-region`.
+   *
+   * כל הרשומות `inTextEntry`: אף אחת מהן אינה פעולת טקסט, ולכן אין שדה
+   * בממשק שלנו שיש לו טענה עליהן — בדיוק כמו `Ctrl+S`.
+   */
+  {
+    id: 'tab-new',
+    label: 'Ctrl+T',
+    description: 'טאב חדש',
+    group: 'tabs',
+    code: 'KeyT',
+    ctrl: true,
+    action: 'tab-new',
+    inTextEntry: true,
+  },
+  {
+    id: 'tab-close',
+    label: 'Ctrl+W',
+    description: 'סגירת הטאב',
+    group: 'tabs',
+    code: 'KeyW',
+    ctrl: true,
+    action: 'tab-close',
+    inTextEntry: true,
+  },
+  {
+    // הצירוף של Word ושל חלונות MDI לסגירת מסמך. שווה ערך ל-`Ctrl+W`, וקיים
+    // מפני שהוא מה שמשתמש Word מנסה — ומפני ש-`Ctrl+W` הוא מקש האצה של
+    // WebView2 עצמו, שאינו מובטח שיגיע אלינו כלל (ראו docs/keyboard-shortcuts-plan.md §6).
+    id: 'tab-close-f4',
+    label: 'Ctrl+F4',
+    description: 'סגירת הטאב',
+    group: 'tabs',
+    code: 'F4',
+    ctrl: true,
+    action: 'tab-close',
+    inTextEntry: true,
+  },
+  {
+    id: 'tab-reopen',
+    label: 'Ctrl+Shift+T',
+    description: 'פתיחה מחדש של הטאב שנסגר',
+    group: 'tabs',
+    code: 'KeyT',
+    ctrl: true,
+    shift: true,
+    action: 'tab-reopen',
+    inTextEntry: true,
+  },
+  {
+    id: 'tab-next',
+    label: 'Ctrl+Tab',
+    description: 'הטאב הבא',
+    group: 'tabs',
+    code: 'Tab',
+    ctrl: true,
+    action: 'tab-next',
+    inTextEntry: true,
+    repeatable: true,
+  },
+  {
+    id: 'tab-prev',
+    label: 'Ctrl+Shift+Tab',
+    description: 'הטאב הקודם',
+    group: 'tabs',
+    code: 'Tab',
+    ctrl: true,
+    shift: true,
+    action: 'tab-prev',
+    inTextEntry: true,
+    repeatable: true,
+  },
+  {
+    id: 'tab-next-page',
+    label: 'Ctrl+Page Down',
+    description: 'הטאב הבא',
+    group: 'tabs',
+    code: 'PageDown',
+    ctrl: true,
+    action: 'tab-next',
+    inTextEntry: true,
+    repeatable: true,
+  },
+  {
+    id: 'tab-prev-page',
+    label: 'Ctrl+Page Up',
+    description: 'הטאב הקודם',
+    group: 'tabs',
+    code: 'PageUp',
+    ctrl: true,
+    action: 'tab-prev',
+    inTextEntry: true,
+    repeatable: true,
+  },
+  {
+    id: 'tab-next-f6',
+    label: 'Ctrl+F6',
+    description: 'הטאב הבא',
+    group: 'tabs',
+    code: 'F6',
+    ctrl: true,
+    action: 'tab-next',
+    inTextEntry: true,
+    repeatable: true,
+  },
+  {
+    id: 'tab-prev-f6',
+    label: 'Ctrl+Shift+F6',
+    description: 'הטאב הקודם',
+    group: 'tabs',
+    code: 'F6',
+    ctrl: true,
+    shift: true,
+    action: 'tab-prev',
+    inTextEntry: true,
+    repeatable: true,
+  },
+  {
+    id: 'tab-goto-1',
+    label: 'Alt+1',
+    description: 'מעבר לטאב הראשון',
+    group: 'tabs',
+    code: 'Digit1',
+    alt: true,
+    action: 'tab-goto',
+    payload: 1,
+    inTextEntry: true,
+  },
+  {
+    id: 'tab-goto-2',
+    label: 'Alt+2',
+    description: 'מעבר לטאב השני',
+    group: 'tabs',
+    code: 'Digit2',
+    alt: true,
+    action: 'tab-goto',
+    payload: 2,
+    inTextEntry: true,
+  },
+  {
+    id: 'tab-goto-3',
+    label: 'Alt+3',
+    description: 'מעבר לטאב השלישי',
+    group: 'tabs',
+    code: 'Digit3',
+    alt: true,
+    action: 'tab-goto',
+    payload: 3,
+    inTextEntry: true,
+  },
+  {
+    id: 'tab-goto-4',
+    label: 'Alt+4',
+    description: 'מעבר לטאב הרביעי',
+    group: 'tabs',
+    code: 'Digit4',
+    alt: true,
+    action: 'tab-goto',
+    payload: 4,
+    inTextEntry: true,
+  },
+  {
+    id: 'tab-goto-5',
+    label: 'Alt+5',
+    description: 'מעבר לטאב החמישי',
+    group: 'tabs',
+    code: 'Digit5',
+    alt: true,
+    action: 'tab-goto',
+    payload: 5,
+    inTextEntry: true,
+  },
+  {
+    id: 'tab-goto-6',
+    label: 'Alt+6',
+    description: 'מעבר לטאב השישי',
+    group: 'tabs',
+    code: 'Digit6',
+    alt: true,
+    action: 'tab-goto',
+    payload: 6,
+    inTextEntry: true,
+  },
+  {
+    id: 'tab-goto-7',
+    label: 'Alt+7',
+    description: 'מעבר לטאב השביעי',
+    group: 'tabs',
+    code: 'Digit7',
+    alt: true,
+    action: 'tab-goto',
+    payload: 7,
+    inTextEntry: true,
+  },
+  {
+    id: 'tab-goto-8',
+    label: 'Alt+8',
+    description: 'מעבר לטאב השמיני',
+    group: 'tabs',
+    code: 'Digit8',
+    alt: true,
+    action: 'tab-goto',
+    payload: 8,
+    inTextEntry: true,
+  },
+  {
+    id: 'tab-goto-last',
+    label: 'Alt+9',
+    description: 'מעבר לטאב האחרון',
+    group: 'tabs',
+    code: 'Digit9',
+    alt: true,
+    action: 'tab-goto-last',
+    inTextEntry: true,
   },
   {
     id: 'paste',
@@ -763,6 +1027,16 @@ export const SHORTCUTS = [
     group: 'app',
     code: 'ContextMenu',
     action: 'context-menu',
+  },
+  {
+    id: 'tell-me',
+    label: 'Alt+Q',
+    description: 'חיפוש אפשרויות ופקודות (Tell Me)',
+    group: 'app',
+    code: 'KeyQ',
+    alt: true,
+    action: 'tell-me',
+    inTextEntry: true,
   },
   {
     id: 'escape',

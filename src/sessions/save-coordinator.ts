@@ -217,9 +217,19 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
   }
 
   function fail(error: unknown, fallback: string): SaveOutcome {
-    lastError = error instanceof Error && error.message ? error.message : fallback;
+    console.warn(`[otzaria-word] שמירה נכשלה (${fallback}):`, error);
+    const errorMsg = error instanceof Error && error.message ? error.message.trim() : '';
+    let message: string;
+    if (!errorMsg || errorMsg === fallback) {
+      message = fallback;
+    } else if (errorMsg.startsWith(`${fallback}: `)) {
+      message = errorMsg;
+    } else {
+      message = `${fallback}: ${errorMsg}`;
+    }
+    lastError = message;
     setState('error');
-    return { status: 'failed', message: `${fallback}: ${lastError}` };
+    return { status: 'failed', message };
   }
 
   /** סבב שמירה אחד: ייצוא → העלאה → commit. */
@@ -252,10 +262,16 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
       return fail(error, 'ייצוא המסמך נכשל');
     }
 
-    let ticket: SaveTicket | undefined;
+    let ticket: SaveTicket;
     try {
       stage('uploading');
       ticket = await deps.beginWrite(blob.size);
+    } catch (error) {
+      if (mine !== epoch) return { status: 'stale' };
+      return fail(error, 'הכנת השמירה באוצריא נכשלה');
+    }
+
+    try {
       await deps.upload(ticket.uploadUrl, blob);
     } catch (error) {
       // ההעלאה נפתחה ולא תגיע ל-commit — לשחרר אותה עכשיו ולא לחכות לפקיעה.
@@ -359,7 +375,19 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
     const isClean = dirtyRevision === savedRevision;
     // „שמור בשם” על מסמך נקי הוא בקשה לגיטימית להעתק, והוא מייצא בלי לשנות
     // revision: הגדלה מלאכותית שרדה ביטול של הדיאלוג וסימנה מסמך נקי כמלוכלך.
-    if (isClean && !options.forceSaveAs) {
+    //
+    // ו-`targetToken` הוא התנאי השני, ולא קוסמטיקה: מסמך שלא נכתב לדיסק
+    // מעולם **אינו** „נקי”, הוא „אין לו עותק בשום מקום”. בלי התנאי הזה „שמור”
+    // על מסמך חדש שלא נגעו בו חזר `clean` ולא עשה דבר — לא דיאלוג ולא הודעה —
+    // כלומר לחיצה שנבלעת בלי שום סימן. `saveLoop` שולח commit בלי
+    // `targetToken` כש-`!target`, ולכן המאחז פותח „שמור בשם”, וזו ההתנהגות
+    // של Word.
+    //
+    // אין לזה מסלול אחר שנפגע. שאר הקוראים הם שניים: הענף „לשמור קודם” של
+    // `decideDocumentSwitch`, שמקצר על `!isDirty()`; ו-`scheduleAutosave`,
+    // שיוצא על `!targetToken` עוד לפני שהוא מגיע לכאן. כלומר מסמך נקי בלי יעד
+    // מגיע לכאן אך ורק מלחיצה מפורשת של המשתמש.
+    if (isClean && !options.forceSaveAs && targetToken !== null) {
       return Promise.resolve({ status: 'clean' });
     }
 

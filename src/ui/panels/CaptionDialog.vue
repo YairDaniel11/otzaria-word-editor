@@ -14,7 +14,8 @@
         <button
           type="button"
           class="cp-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את הכיתובים"
           @click="$emit('close')"
         >
@@ -84,7 +85,7 @@
             v-model="position"
             class="cp-input"
             :disabled="selected !== ''"
-            :title="selected === '' ? '' : POSITION_LOCKED"
+            :data-tip-title="selected === '' ? undefined : POSITION_LOCKED"
             aria-label="האם הכיתוב יופיע מעל הפסקה שבסמן או מתחתיה"
           >
             <option value="below">

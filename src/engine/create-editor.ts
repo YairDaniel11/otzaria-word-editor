@@ -17,6 +17,7 @@ import '../styles/engine-chrome.css';
 import { splashStage, SPLASH_STAGES } from '../host/splash';
 import { installFormatPainter } from './format-painter';
 import { localizeEngineChrome } from './hf-chrome';
+import { installPointerSnap } from './pointer-snap';
 import { installWordSelection } from './word-selection';
 import { engineWorkerUrls } from './workers';
 
@@ -60,6 +61,14 @@ export interface CreateEditorOptions {
   onPaginationUpdate?: (totalPages: number) => void;
   /** מעל הזמן הזה הפתיחה נכשלת. ראו OPEN_TIMEOUT_MS. */
   timeoutMs?: number;
+  /**
+   * „דלג” — נטישת הפתיחה מצד המשתמש. ראו OPEN_CANCELLED_MESSAGE.
+   *
+   * מה שהוא קונה מעל „פשוט להתעלם מהתוצאה”: המופע החצי-בנוי **מפורק**, ואיתו
+   * ה-workers שלו. פתיחה שנזנחה בלי זה ממשיכה לבנות את המסמך עד הסוף — כלומר
+   * המשתמש לוחץ „דלג”, המחוון נעלם, והמכונה נשארת עמוסה בדיוק כמו לפניו.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -78,6 +87,16 @@ export interface CreateEditorOptions {
  * לפני שהמנוע רואה את הבייטים — engine/docx-preflight.ts.
  */
 export const OPEN_TIMEOUT_MS = 120_000;
+
+/**
+ * ההודעה של פתיחה שהמשתמש נטש („דלג” בשורת המצב).
+ *
+ * דחייה ולא הבטחה שנשארת תלויה, מפני שהפתיחה מפורקת כאן ומי שקרא חייב לדעת
+ * שלא תגיע תוצאה. `EditorSwap` הוא זה שבולע אותה — הוא מקדם את הדור לפני
+ * הביטול, ולכן התוצאה שם היא `superseded` ולא `failed`, ושום שגיאה אינה
+ * מגיעה לשורת המצב. ראו sessions/editor-swap.ts.
+ */
+export const OPEN_CANCELLED_MESSAGE = 'פתיחת המסמך בוטלה';
 
 /**
  * ההודעה שמגיעה מ-exception של SuperDoc. ה-union מגיע מארבעה מקומות שונים
@@ -107,6 +126,7 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
     onUpdate,
     onPaginationUpdate,
     timeoutMs = OPEN_TIMEOUT_MS,
+    signal,
   } = options;
 
   return new Promise((resolve, reject) => {
@@ -115,6 +135,27 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
     let timer: ReturnType<typeof setTimeout> | undefined;
     /** כשל שהגיע לפני שהבנאי חזר, ולכן לא היה מה לפרק באותו רגע. */
     let pendingTeardown = false;
+
+    /** כל מה שממתין לתשובה: השעון, וההאזנה ל„דלג”. */
+    function stopWaiting(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    }
+
+    /**
+     * „דלג”. אותו מסלול בדיוק כמו כשל לפני `onReady` — כולל פירוק המופע
+     * החצי-בנוי, שהוא כל הטעם שיש בביטול (ראו `CreateEditorOptions.signal`).
+     * `pendingTeardown` מכסה את המקרה התיאורטי שבו האיתות כבר מורם כשנכנסים
+     * לכאן, כלומר לפני שהבנאי חזר.
+     */
+    function onAbort(): void {
+      if (settled) return;
+      settled = true;
+      stopWaiting();
+      if (instance) destroy(instance);
+      else pendingTeardown = true;
+      reject(new Error(OPEN_CANCELLED_MESSAGE));
+    }
 
     const disposers: Array<() => void> = [];
     let destroyed = false;
@@ -133,6 +174,11 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
       }
       target.destroy();
     }
+
+    // הצמדת לחיצה לשורה הקרובה (pointer-snap.ts). **לפני** הבנאי, ובכוונה:
+    // המאזין מחליף את קואורדינטות האירוע, וזה עוזר רק אם הוא רץ לפני המאזינים
+    // שהמנוע רושם על window/document בבנייה — סדר הרישום הוא סדר הריצה.
+    disposers.push(installPointerSnap(container).dispose);
 
     const superdoc = new SuperDoc({
       selector: container,
@@ -177,7 +223,7 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
       onReady: ({ superdoc: ready }) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
+        stopWaiting();
         const session: EditorSession = {
           superdoc: ready,
           ui: ready.ui,
@@ -213,7 +259,7 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
         onError?.(error, payload);
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
+        stopWaiting();
         // כשל לפני onReady משאיר מופע חצי-בנוי עם workers פתוחים. אם ה-exception
         // נורה מתוך הבנאי עצמו — והטיפוסים מתעדים מסלול כזה, שבו הריצה "mounts
         // only enough state to report that error" — instance עדיין undefined,
@@ -236,8 +282,15 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
     timer = setTimeout(() => {
       if (settled) return;
       settled = true;
+      stopWaiting();
       destroy(superdoc);
       reject(new Error('פתיחת המסמך לא הסתיימה בזמן סביר'));
     }, timeoutMs);
+
+    // אחרי השעון ולא לפניו: `onAbort` מנקה את שניהם, ולכן ההאזנה נרשמת רק
+    // כשיש כבר מה לנקות. ה-`aborted` הוא מסלול אמיתי ולא הגנה תיאורטית —
+    // ביטול שהגיע בזמן השלבים שלפני המנוע מרים את האיתות לפני הקריאה לכאן.
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
   });
 }

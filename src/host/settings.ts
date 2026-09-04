@@ -6,6 +6,8 @@
  * שאוצריא מחזירה תקף לריצה אחת בלבד, כי הפורט של שרת ה-loopback מתחלף.
  */
 import { call, tryCall } from './otzaria-client';
+import type { RecentDocument } from '../sessions/recent-documents';
+import type { DiscardedDocument } from '../sessions/discard-backup';
 
 /**
  * המסמך שהיה פתוח לאחרונה.
@@ -98,4 +100,110 @@ export async function saveRulerVisible(visible: boolean): Promise<void> {
 /** נשמר בנפרד מ-tryCall כדי שכשל בכתיבה לא ייעלם בשקט בקריאה מפורשת. */
 export async function setSetting(key: string, value: unknown): Promise<void> {
   await call('storage.set', { key, value });
+}
+
+/**
+ * הגדרה גנרית לפי מפתח — לזיכרון של דיאלוגים (composables/useRememberedOptions.ts).
+ *
+ * `fallback` חוזר גם כשאין ערך, גם בכשל קריאה וגם מחוץ לאוצריא: זיכרון של
+ * דיאלוג אינו סיבה שהדיאלוג לא ייפתח. האימות של הצורה נעשה אצל הקורא —
+ * כאן רק ההבחנה בין „יש משהו” ל„אין”.
+ */
+export async function loadSetting<T>(
+  key: string,
+  fallback: T,
+  parse: (raw: unknown) => T | null,
+): Promise<T> {
+  const raw = await tryCall<unknown>('storage.get', { key });
+  if (raw === null || raw === undefined) return fallback;
+  return parse(raw) ?? fallback;
+}
+
+/** כתיבה שקטה — כשל בשמירת זיכרון של דיאלוג אינו כשל של הכלי. */
+export async function saveSetting(key: string, value: unknown): Promise<void> {
+  await tryCall('storage.set', { key, value });
+}
+
+const SPELLCHECK_KEY = 'spellcheck-enabled';
+
+/**
+ * האם בדיקת האיות התורנית דלוקה. ברירת המחדל **כבויה**, ולא במקרה: הדלקה
+ * מושכת את המילון (1.3MB בנכס נפרד, engine/spellcheck-dictionary.ts), ומשתמש
+ * שלא ביקש אותה לא אמור לשלם עליו.
+ *
+ * העדפה של התוכנה ולא תכונה של המסמך — כמו הסרגל שמעל, ומאותה סיבה: המצב
+ * חי על שכבת התצוגה שלנו, ומסמך חדש היה מכבה אותה בכל פתיחה.
+ */
+export async function loadSpellcheckEnabled(): Promise<boolean> {
+  return (await tryCall<unknown>('storage.get', { key: SPELLCHECK_KEY })) === true;
+}
+
+export async function saveSpellcheckEnabled(enabled: boolean): Promise<void> {
+  await tryCall('storage.set', { key: SPELLCHECK_KEY, value: enabled });
+}
+
+const SPELLCHECK_WORDS_KEY = 'spellcheck-user-words';
+
+/**
+ * מילון המשתמש — מה שנוסף דרך „הוסף למילון” בתפריט ההקשר.
+ *
+ * נשמר לבד, ולא כעותק של המילון הקבוע: 102,465 הערכים אינם עוברים ב-`storage`
+ * לעולם. ערך פגום נקרא כרשימה ריקה — מילון משתמש שאבד אינו סיבה להיכשל
+ * בעלייה, והמשתמש פשוט יוסיף שוב.
+ */
+export async function loadSpellcheckWords(): Promise<string[]> {
+  const raw = await tryCall<unknown>('storage.get', { key: SPELLCHECK_WORDS_KEY });
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((word): word is string => typeof word === 'string' && word.length > 0);
+}
+
+export async function saveSpellcheckWords(words: readonly string[]): Promise<void> {
+  await tryCall('storage.set', { key: SPELLCHECK_WORDS_KEY, value: [...words] });
+}
+
+const RECENT_DOCUMENTS_KEY = 'recent-documents';
+
+/**
+ * הרשימה הגולמית של „המסמכים האחרונים”. הפירוש — השמטת שורות פגומות, השמטת
+ * token חוזר וברירות המחדל — יושב ב-sessions/recent-documents.ts
+ * (`normalizeRecents`), בדיוק כמו ההפרדה בין `loadSessionRecord`
+ * ל-`normalizeSession` שמעל, ומאותו טעם: ההחלטות נבדקות בלי לזייף את הגשר.
+ */
+export async function loadRecentDocuments(): Promise<unknown> {
+  return tryCall<unknown>('storage.get', { key: RECENT_DOCUMENTS_KEY });
+}
+
+/**
+ * כותבת את הרשימה. `[...list]` ולא `list` עצמה: מה שנמסר עשוי להיות מערך
+ * לקריאה בלבד שנשמר גם ב-state של המעטפת, וה-JSON שיוצא לגשר לא אמור להיות
+ * אותו אובייקט.
+ *
+ * כשל כתיבה נבלע (`tryCall`) כמו בכל שאר ההעדפות כאן: רשימת אחרונים שלא
+ * נשמרה אינה סיבה להפיל פתיחת מסמך.
+ */
+export async function saveRecentDocuments(list: readonly RecentDocument[]): Promise<void> {
+  await tryCall('storage.set', { key: RECENT_DOCUMENTS_KEY, value: [...list] });
+}
+
+const DISCARD_BACKUPS_KEY = 'discard-backups';
+
+/**
+ * רשומת „חמשת האחרונים שנסגרו בלי לשמור” — metadata בלבד: משבצת, שם, גודל,
+ * זמן ו-token. הבייטים עצמם יושבים במרחב הפרטי (`host/workspace.ts`), בדיוק
+ * כמו הטיוטה, ומאותה סיבה: ב-`storage` נשמר JSON, לא מסמך.
+ *
+ * הפירוש — השמטת שורות פגומות, משבצת כפולה, והסדר מהחדש לישן — יושב
+ * ב-sessions/discard-backup.ts (`normalizeBackups`), כמו כל שאר ההפרדות כאן.
+ */
+export async function loadDiscardBackups(): Promise<unknown> {
+  return tryCall<unknown>('storage.get', { key: DISCARD_BACKUPS_KEY });
+}
+
+/**
+ * כותבת את הרשומה. כשל נבלע — גיבוי שלא נרשם אינו סיבה להפיל את הסגירה
+ * שהמשתמש ביקש; מה שהוא כן עושה הוא להשאיר קובץ שהרשומה אינה מכירה, ואת זה
+ * המשבצות כבר פותרות (ראו את ראש discard-backup.ts).
+ */
+export async function saveDiscardBackups(list: readonly DiscardedDocument[]): Promise<void> {
+  await tryCall('storage.set', { key: DISCARD_BACKUPS_KEY, value: [...list] });
 }

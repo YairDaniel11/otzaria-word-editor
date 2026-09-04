@@ -366,3 +366,62 @@ export async function applyCaretAnchor(
 
   return attempt({ ...anchor.start, blockId: startId }, { ...end, blockId: endId });
 }
+
+/**
+ * האם יש עכשיו סמן או בחירה בטקסט המסמך — קריאה סינכרונית של תצלום הבחירה
+ * בלבד, בלי לפתור סדר פסקאות.
+ *
+ * למי זה משמש: סמן הפתיחה (`applyDocumentStartCaret`). אם המשתמש כבר הספיק
+ * ללחוץ בגוף הטקסט בזמן שהפתיחה עוד רצה, הצבת „תחילת המסמך" הייתה דורסת
+ * את הקליק שלו — ולכן בודקים לפני.
+ */
+export function hasTextCaret(host: CaretUi): boolean {
+  const ui = host as CaretUiSource | null | undefined;
+  const getSnapshot = ui?.selection?.getSnapshot;
+  if (typeof getSnapshot !== 'function') return false;
+
+  let slice: SelectionSliceLike | null | undefined;
+  try {
+    slice = getSnapshot.call(ui?.selection);
+  } catch {
+    return false;
+  }
+
+  return (
+    (pointsFromSelectionTarget(slice?.selectionTarget) ?? pointsFromTextTarget(slice?.target)) !==
+    null
+  );
+}
+
+/**
+ * מציבה סמן מכווץ בתחילת המסמך — הפסקה הראשונה, היסט 0.
+ *
+ * למה זה קיים: `superdoc.focus()` ממקד את קלט המקלדת אבל **אינו** מציב סמן
+ * כשאין למסמך בחירה קודמת לשחזר — נמדד על ה-dist הארוז: שדה הקלט של המנוע
+ * נשאר „חונה" (parked), וכל הקלדה נבלעת עד קליק עכבר. מסמך חדש ומסמך שנפתח
+ * בלי מקום שמור מקבלים כאן את מה ש-Word נותן בחינם: סמן שאפשר להקליד אחריו
+ * מיד.
+ *
+ * בלי גלילה, בכוונה: המסמך ממילא נפתח בתחילתו. `false` פירושו שאין פסקה
+ * עם מזהה או שהמנוע דחה — והמסמך נשאר כפי שהיה, בלי סמן, כמו קודם.
+ */
+export async function applyDocumentStartCaret(host: CaretUi, doc: CaretDoc): Promise<boolean> {
+  const ui = host as CaretUiSource | null | undefined;
+  if (typeof ui?.selection?.apply !== 'function') return false;
+
+  const list = (doc as CaretDocSource | null | undefined)?.activeEditor?.doc?.blocks?.list;
+  if (typeof list !== 'function') return false;
+
+  let result: BlocksListLike | null | undefined;
+  try {
+    result = await list({ offset: 0, limit: 1 });
+  } catch {
+    return false;
+  }
+
+  const first = Array.isArray(result?.blocks) ? (result.blocks[0] as BlockEntryLike) : undefined;
+  if (typeof first?.nodeId !== 'string' || first.nodeId === '') return false;
+
+  const head: CaretPoint = { blockId: first.nodeId, ordinal: 0, offset: 0 };
+  return applied(ui, selectionTargetOf(head, head));
+}

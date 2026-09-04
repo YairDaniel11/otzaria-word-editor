@@ -18,7 +18,8 @@
         <button
           type="button"
           class="bd-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את הסימניות"
           @click="$emit('close')"
         >

@@ -49,6 +49,8 @@ function fakeDoc(options: {
   selection?: unknown;
   /** מה ש-`blocks.list` מדווח — כדי לגזור את `nodeType` האמיתי של הבלוק שהסמן בו. */
   blocks?: readonly { nodeId: string; nodeType: string }[];
+  /** `lists.getState`: מזהה בלוק → isListItem, לבלוק שאינו ב-`blocks.list` (טבלה). */
+  listState?: Record<string, boolean>;
 } = {}) {
   const calls = new Map<OpName, unknown[]>();
   const paragraph: Record<string, unknown> = {};
@@ -68,6 +70,17 @@ function fakeDoc(options: {
     format: { paragraph },
     ...(options.get === undefined ? {} : { get: async () => options.get }),
     ...(options.blocks === undefined ? {} : { blocks: { list: async () => ({ blocks: options.blocks }) } }),
+    ...(options.listState === undefined
+      ? {}
+      : {
+          lists: {
+            getState: async (input: { target: { nodeId: string } }) => {
+              const state = options.listState as Record<string, boolean>;
+              const id = input.target.nodeId;
+              return id in state ? { success: true, isListItem: state[id] } : { success: false };
+            },
+          },
+        }),
   } as never;
 
   return { doc, calls, host: { activeEditor: { doc } } };
@@ -360,6 +373,24 @@ describe('readParagraphFormat', () => {
       fakeDoc({ get: documentWith({}), blocks: [{ nodeId: 'other', nodeType: 'heading' }] }).host,
     );
     expect(notFound.ok && notFound.target.nodeType).toBe('paragraph');
+  });
+
+  it('פריט רשימה בתוך תא טבלה: אינו ב-blocks.list, ו-lists.getState קובע listItem', async () => {
+    // issue #14 ג׳: blocks.list מונה בלוקים עליונים בלבד. הסמן ב-p3 שבתוך טבלה.
+    const inTable = await readParagraphFormat(
+      fakeDoc({
+        get: documentWith({}),
+        blocks: [{ nodeId: 'other', nodeType: 'paragraph' }],
+        listState: { p3: true },
+      }).host,
+    );
+    expect(inTable.ok && inTable.target.nodeType).toBe('listItem');
+
+    // פסקה רגילה בטבלה — getState אומר שאינה פריט רשימה.
+    const plainInTable = await readParagraphFormat(
+      fakeDoc({ get: documentWith({}), blocks: [], listState: { p3: false } }).host,
+    );
+    expect(plainInTable.ok && plainInTable.target.nodeType).toBe('paragraph');
   });
 
   it('הכניסות נקראות מ-indent.start/indent.end כשהן קיימות — לא רק left/right', async () => {

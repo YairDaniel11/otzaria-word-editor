@@ -39,7 +39,8 @@
       <button
         type="button"
         class="fr-close-btn"
-        title="סגור (Esc)"
+        data-tip-title="סגור"
+        data-tip-shortcut="Esc"
         aria-label="סגור את חיפוש והחלפה"
         @click="$emit('close')"
       >
@@ -176,6 +177,8 @@ const props = withDefaults(
     resultText?: string;
     /** האם המנוע יכול להחליט כרגע. `false` = אין להציג את פקדי ההחלפה. */
     canReplace?: boolean;
+    /** שאילתה שהגיעה מבחוץ — „חפש במסמך” של Tell Me. ריקה = אין. */
+    initialQuery?: string;
     /** החלפה שנשלחה למנוע וטרם הסתיימה. */
     isReplacing?: boolean;
   }>(),
@@ -185,6 +188,7 @@ const props = withDefaults(
     resultText: '',
     canReplace: false,
     isReplacing: false,
+    initialQuery: '',
   }
 );
 
@@ -199,7 +203,7 @@ const emit = defineEmits<{
 }>();
 
 const mode = ref<'find' | 'replace'>(props.initialMode);
-const searchQuery = ref('');
+const searchQuery = ref(props.initialQuery);
 const replaceQuery = ref('');
 const searchInputRef = ref<HTMLInputElement | null>(null);
 
@@ -218,15 +222,25 @@ watch(
   }
 );
 
+/**
+ * השאילתה מבחוץ נכנסת לשדה בפתיחה, וגם כשהיא משתנה בדיאלוג שכבר פתוח.
+ * שאילתה ריקה אינה מוחקת את מה שהמשתמש חיפש קודם: `Ctrl+F` רגיל נפתח על
+ * החיפוש האחרון, כמו ב-Word.
+ */
+watch([() => props.isOpen, () => props.initialQuery], () => {
+  if (!props.isOpen || props.initialQuery === '') return;
+  searchQuery.value = props.initialQuery;
+  emit('query-change', props.initialQuery);
+});
+
 watch(
   () => props.isOpen,
   (open) => {
-    if (open) {
-      nextTick(() => {
-        searchInputRef.value?.focus();
-        searchInputRef.value?.select();
-      });
-    }
+    if (!open) return;
+    nextTick(() => {
+      searchInputRef.value?.focus();
+      searchInputRef.value?.select();
+    });
   }
 );
 

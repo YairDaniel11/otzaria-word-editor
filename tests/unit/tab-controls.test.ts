@@ -27,10 +27,12 @@ import { join } from 'node:path';
 const TABS = join(process.cwd(), 'src/ui/ribbon/tabs');
 
 const FILES = [
+  'ShulchanTab.vue',
   'LayoutTab.vue',
   'ReferencesTab.vue',
   'ReviewTab.vue',
   'OtzariaTab.vue',
+  'DeveloperTab.vue',
 ] as const;
 
 const SOURCES = new Map(FILES.map((file) => [file, readFileSync(join(TABS, file), 'utf8')]));
@@ -45,8 +47,8 @@ function labelOf(control: string): string {
   return control.match(/label="([^"]*)"/)?.[1] ?? control.slice(0, 60);
 }
 
-describe('פקדי הלשוניות פריסה, הפניות, סקירה ואוצריא', () => {
-  it('נמצאו פקדים לבדוק בכל שלוש הלשוניות', () => {
+describe('פקדי הלשוניות פריסה, הפניות, סקירה, אוצריא ומפתחים', () => {
+  it('נמצאו פקדים לבדוק בכל הלשוניות', () => {
     for (const file of FILES) {
       expect(controls(SOURCES.get(file)!).length, file).toBeGreaterThan(0);
     }
@@ -129,9 +131,11 @@ describe('פקדי לשונית „קובץ”', () => {
    */
   const UNCONDITIONAL = ['אודות', 'קיצורים'];
 
-  it('נמצאו עשרה פקדים', () => {
-    // עשרה מאז ש„ייצוא ל-PDF" נוסף (ui.exportPdf, אוצריא 0.9.97).
-    expect(controls(FILE_TAB)).toHaveLength(10);
+  it('נמצאו תשעה פקדים', () => {
+    // תשעה מאז ש„ייצוא ל-Word” הוסר — הורדה לתיקיית ההורדות שנראתה כמו
+    // שמירה ולא הייתה שמירה (ראו FileTab.vue). „ייצוא לאוצריא” יושב בלשונית
+    // „אוצריא” — הוא פעולה מול הספרייה, לא פעולת קובץ.
+    expect(controls(FILE_TAB)).toHaveLength(9);
   });
 
   it('לכל פקד יש חיווט של disabled — חוץ מ„אודות” ומ„קיצורים”', () => {
@@ -143,7 +147,7 @@ describe('פקדי לשונית „קובץ”', () => {
   });
 
   it('התנאי הוא מצב המעטפת, ולא `true` קשיח', () => {
-    // `:disabled="true"` כאן היה אומר „הפקד לא ממומש”, וכל השמונה ממומשים.
+    // `:disabled="true"` כאן היה אומר „הפקד לא ממומש”, וכל התשעה ממומשים.
     for (const control of controls(FILE_TAB)) {
       expect(control, labelOf(control)).not.toContain(':disabled="true"');
     }

@@ -72,8 +72,8 @@
  * נמדדה כמצליחה — `<w:pgNumType w:start="1" w:fmt="hebrew1"/>` ב-docx המיוצא.
  * שאר השורות למעלה עדיין נכונות: `doc.sections` הוא ה-namespace שכן מאמת קלט.
  *
- * שתי האפשרויות עדיין **אינן מוצעות בדיאלוג** — הוא מציע את ששת הפורמטים
- * הלטיניים בלבד. ר' `docs/superdoc-2.10-review.md`.
+ * שתי האפשרויות **מוצעות בדיאלוג** — `PAGE_NUMBER_FORMATS` הוא שמונה, והטופס
+ * מרנדר את כולו. ר' `docs/superdoc-2.10-review.md`.
  *
  * ### מה שנכתב, ונמדד ב-docx
  *
@@ -192,6 +192,18 @@ export interface PaperSize {
 export const PAPER_SIZES: readonly PaperSize[] = [
   { id: 'a4', label: 'A4', hint: '21 × 29.7 ס"מ', widthTwips: 11906, heightTwips: 16838, code: '9' },
   { id: 'letter', label: 'Letter', hint: '21.6 × 27.9 ס"מ', widthTwips: 12240, heightTwips: 15840, code: '1' },
+  /**
+   * A5 — הגודל של קונטרס וחוברת, ולכן הוא כאן ולא ברשימת „גדלים נוספים”
+   * דמיונית: זהו הפורמט השני בשכיחותו בספרי קודש אחרי A4, והוא מה שתבנית
+   * „קונטרס A5” (engine/templates.ts) מבקשת. בלעדיו התבנית הייתה מייצרת A4
+   * ומודיעה על כך — כלומר כרטיס שמצייר גיליון קטן ומסמך שיוצא גדול.
+   *
+   * המידות: 148 × 210 מ״מ בתקן ISO. ‏148 מ״מ = ‎148/25.4×1440 = 8390.55 →
+   * 8391 twips, ו-210 מ״מ = 11906 twips. שהגובה של A5 שווה בדיוק לרוחב של A4
+   * אינו צירוף מקרים אלא ההגדרה של הסדרה: כל גודל הוא חצייה של קודמו לרוחב.
+   * `code` הוא `w:code` של Word ל-A5 (‏`dmPaperSize` = 11).
+   */
+  { id: 'a5', label: 'A5', hint: '14.8 × 21 ס"מ', widthTwips: 8391, heightTwips: 11906, code: '11' },
 ];
 
 export type PageOrientation = 'portrait' | 'landscape';
@@ -382,8 +394,13 @@ async function applyToSections(
   host: PageSetupTarget,
   failedAction: string,
   pick: (sections: Sections) => ((section: SectionItem, target: unknown) => MaybePromise<DocReceipt>) | null,
-  /** בדיקה לפני הכתיבה. מחרוזת = סירוב, עם הנימוק שיוצג למשתמש. */
-  guard?: (section: SectionItem) => string | null,
+  /** אובייקט ולא פרמטרים נוספים: קורא שרוצה `note` בלבד לא יעביר `undefined` ל-`guard`. */
+  extras: {
+    /** בדיקה לפני הכתיבה. מחרוזת = סירוב, עם הנימוק שיוצג למשתמש. */
+    guard?: (section: SectionItem) => string | null;
+    /** הודעת-מידע על הצלחה, נגזרת מהמקטעים שנכתבו בפועל. */
+    note?: (sections: readonly SectionItem[]) => string | undefined;
+  } = {},
 ): Promise<CommandOutcome> {
   const doc = (host as PageSetupHost | null | undefined)?.activeEditor?.doc;
   if (!doc) return unavailable(failedAction, 'המסמך עדיין נטען', 'document-api-unavailable');
@@ -408,7 +425,7 @@ async function applyToSections(
 
   // כל הבדיקות לפני כל הכתיבות: סירוב באמצע היה משאיר חצי מהמקטעים משונים.
   for (const section of targets) {
-    const refusal = guard?.(section);
+    const refusal = extras.guard?.(section);
     if (refusal) return unavailable(failedAction, refusal, 'invalid-input');
   }
 
@@ -427,7 +444,8 @@ async function applyToSections(
     }
   }
 
-  return { ok: true };
+  const info = extras.note?.(targets);
+  return info ? { ok: true, note: info } : { ok: true };
 }
 
 export function findMarginPreset(id: string): MarginPreset | undefined {
@@ -671,7 +689,7 @@ export function applyPageMargins(
       if (!setPageMargins) return null;
       return (_section, target) => setPageMargins({ target, ...payload });
     },
-    (section) => leavesRoomForText(section, input),
+    { guard: (section) => leavesRoomForText(section, input) },
   );
 }
 
@@ -773,23 +791,56 @@ export function applyPaperSize(
         });
       };
     },
-    // דף קטן יותר עם אותם שוליים יכול לחצות את הצוק — A4 גבוה מ-Letter
-    // בכמעט אינץ'. אותו חסם בדיוק כמו בשוליים, ומאותה סיבה.
-    (section) => {
-      const { width, height } = sizeOf(section);
-      const top = inchesToTwips(section.margins?.top) ?? 0;
-      const bottom = inchesToTwips(section.margins?.bottom) ?? 0;
-      const left = inchesToTwips(section.margins?.left) ?? 0;
-      const right = inchesToTwips(section.margins?.right) ?? 0;
-      if (marginsLeaveRoom(height, top, bottom) === false) {
-        return `השוליים הנוכחיים גדולים מדי לגובה של ${size.label}`;
-      }
-      if (marginsLeaveRoom(width, left, right) === false) {
-        return `השוליים הנוכחיים גדולים מדי לרוחב של ${size.label}`;
-      }
-      return null;
+    {
+      // דף קטן יותר עם אותם שוליים יכול לחצות את הצוק — A4 גבוה מ-Letter
+      // בכמעט אינץ'. אותו חסם בדיוק כמו בשוליים, ומאותה סיבה.
+      guard: (section) => {
+        const { width, height } = sizeOf(section);
+        const top = inchesToTwips(section.margins?.top) ?? 0;
+        const bottom = inchesToTwips(section.margins?.bottom) ?? 0;
+        const left = inchesToTwips(section.margins?.left) ?? 0;
+        const right = inchesToTwips(section.margins?.right) ?? 0;
+        if (marginsLeaveRoom(height, top, bottom) === false) {
+          return `השוליים הנוכחיים גדולים מדי לגובה של ${size.label}`;
+        }
+        if (marginsLeaveRoom(width, left, right) === false) {
+          return `השוליים הנוכחיים גדולים מדי לרוחב של ${size.label}`;
+        }
+        return null;
+      },
     },
   );
+}
+
+/**
+ * מה שצריך לומר למשתמש כששתי עמודות ומעלה נפתחות במקטע עברי.
+ *
+ * המנוע ממלא את הטורים שמאל→ימין גם כשב-`sectPr` יש `w:bidi`, בעוד
+ * ECMA-376 §17.6.1 קובע ש-`w:bidi` הוא שמכריע את סידור הטורים — כלומר
+ * שהעמודה הראשונה שייכת לצד **ימין**. הפער נמדד ב-QA
+ * (`scripts/qa/column-selection-probe.mjs`): שורה 01 נוחתת בטור השמאלי,
+ * וגרירה בסדר הקריאה — מימין ואז שמאלה — מוחקת את מה שכבר סומן, מפני
+ * שהטור הימני הוא השני בסדר המסמך והגרירה שמאלה הולכת אחורה.
+ *
+ * הנזק הוא בתצוגה ובאינטראקציה בלבד. הייצוא נכון, ונמדד: ה-`sectPr` יוצא
+ * עם `w:bidi` ועם `<w:cols w:num="2"/>`, כך שהקובץ נפתח נכון ב-Word. לכן
+ * הפעולה מצליחה ומלווה בהודעה, ולא נחסמת — חסימה הייתה מונעת מהמשתמש
+ * לייצר מסמך תקין בגלל באג בציור.
+ *
+ * `undefined` כשאין מה לומר: עמודה אחת אינה מסודרת בטורים כלל, ומקטע LTR
+ * מצויר נכון כמו שהוא.
+ *
+ * מיוצאת מפני שהניסוח הוא העיקר כאן, והוא נבדק בלי מנוע.
+ *
+ * להסרה כשהתיקון במנוע יגיע לגרסה שהתוסף נועל — ראו `docs/engine-gaps.md`.
+ */
+export function rtlColumnNote(
+  count: number,
+  sections: readonly Pick<SectionItem, 'sectionDirection'>[],
+): string | undefined {
+  if (count < 2) return undefined;
+  if (!sections.some((section) => section.sectionDirection === 'rtl')) return undefined;
+  return 'העמודה הראשונה מצוירת בצד שמאל, וגם הסימון עובר שמאל→ימין. הקובץ יישמר נכון.';
 }
 
 export function applyColumns(
@@ -804,17 +855,22 @@ export function applyColumns(
     });
   }
 
-  return applyToSections(host, `שינוי מספר העמודות ל-${count} נכשל`, (sections) => {
-    const setColumns = sections.setColumns;
-    if (!setColumns) return null;
-    return (_section, target) =>
-      setColumns({
-        target,
-        count,
-        gap: twipsToInches(COLUMN_GAP_TWIPS),
-        equalWidth: true,
-      });
-  });
+  return applyToSections(
+    host,
+    `שינוי מספר העמודות ל-${count} נכשל`,
+    (sections) => {
+      const setColumns = sections.setColumns;
+      if (!setColumns) return null;
+      return (_section, target) =>
+        setColumns({
+          target,
+          count,
+          gap: twipsToInches(COLUMN_GAP_TWIPS),
+          equalWidth: true,
+        });
+    },
+    { note: (sections) => rtlColumnNote(count, sections) },
+  );
 }
 
 /* ------------------------------------------------------------------ */

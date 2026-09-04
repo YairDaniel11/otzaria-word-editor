@@ -20,6 +20,13 @@
 declare global {
   interface Window {
     __SUPERDOC_WORKER_SOURCES__?: Record<string, string>;
+    /**
+     * ה-blob URL של worker המסמך, כשהטוען שב-index.html כבר בנה אותו לחימום
+     * מוקדם (ראו deferredEntry ב-vite.config.ts — השם משותף איתו). אימוץ
+     * ה-URL הזה, ולא בנייה של חדש מאותו תוכן, הוא מה שמפגיש את ה-Worker של
+     * המנוע עם הקומפילציה החמה: ה-cache ממופתח לפי URL.
+     */
+    __otzariaDocWorkerUrl?: string;
   }
 }
 
@@ -82,7 +89,12 @@ export function engineWorkerUrls(): EngineWorkerUrls | undefined {
     // תפקיד חסר נשאר undefined בכוונה: SuperDoc ייפול חזרה ל-URL המובנה שלו
     // במקום לקבל blob: ריק שייכשל בטעינה.
     if (typeof code === 'string' && code !== '') {
-      const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+      // ה-URL שהטוען כבר בנה לחימום קודם לבנייה חדשה — ראו את ההצהרה למעלה.
+      const warmUrl = role === 'document' ? window.__otzariaDocWorkerUrl : undefined;
+      const url =
+        typeof warmUrl === 'string' && warmUrl.startsWith('blob:')
+          ? warmUrl
+          : URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
       ownUrls.add(url);
       urls[role] = url;
     }
@@ -99,6 +111,9 @@ export function engineWorkerUrls(): EngineWorkerUrls | undefined {
  * בדיקה עוטפת את ה-Worker שהיא עצמה התקינה.
  */
 export function resetEngineWorkerUrlsCache(): void {
+  // ה-URL המאומץ מהטוען עלול להיות בין ה-ownUrls שנשרפים כאן; מחיקת הגלובל
+  // מונעת אימוץ חוזר של URL שבוטל.
+  if (typeof window !== 'undefined') delete window.__otzariaDocWorkerUrl;
   for (const url of ownUrls) URL.revokeObjectURL(url);
   ownUrls.clear();
   cached = undefined;

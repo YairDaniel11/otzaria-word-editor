@@ -6,6 +6,7 @@ import './styles/tokens.css';
 import './styles/shell.css';
 import './styles/ribbon.css';
 import './styles/print.css';
+import './styles/crop-marks.css';
 import App from './App.vue';
 import { installBundledFonts } from './styles/fonts';
 import { onThemeChanged, resolveBoot } from './host/otzaria-client';
@@ -75,5 +76,5 @@ async function main(): Promise<void> {
 // עצמו הוא מה שלא עלה. מסך הטעינה הוא המשטח היחיד שנשאר, ולכן הוא מדווח.
 void main().catch((error: unknown) => {
   console.error('[otzaria-word] כשל בעליית התוסף:', error);
-  splashFail('התוסף לא הצליח לעלות');
+  splashFail('התוסף לא הצליח לעלות', error instanceof Error ? error.message : String(error));
 });

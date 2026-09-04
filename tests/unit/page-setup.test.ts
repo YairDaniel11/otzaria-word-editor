@@ -54,6 +54,7 @@ import {
   TWIPS_PER_INCH,
   VERTICAL_ALIGNS,
   applyColumns,
+  rtlColumnNote,
   applyHeaderDistance,
   applyLineNumbering,
   applyMarginPreset,
@@ -1054,11 +1055,16 @@ describe('applyPaperSize', () => {
   });
 });
 
+/** הניסוח היחיד, כדי ששינוי בו ייראה במקום אחד ולא יישבר בשש בדיקות. */
+const RTL_COLUMN_NOTE = 'העמודה הראשונה מצוירת בצד שמאל, וגם הסימון עובר שמאל→ימין. הקובץ יישמר נכון.';
+
 describe('applyColumns', () => {
   it('שולחת count שלם, equalWidth ורווח של חצי אינץ\'', async () => {
     const { host, calls, xml } = fakeEngine();
 
-    expect(await applyColumns(host, 2)).toEqual({ ok: true });
+    // הכפיל מייצר מקטע עברי כברירת מחדל, ולכן שתי עמודות מלוות בהודעה — ראו
+    // `rtlColumnNote` למטה. הפעולה עצמה מצליחה, וזה מה שנמדד כאן.
+    expect(await applyColumns(host, 2)).toEqual({ ok: true, note: RTL_COLUMN_NOTE });
     expect(calls[0]!.input).toEqual({
       target: { kind: 'section', sectionId: 's0' },
       count: 2,
@@ -1067,6 +1073,20 @@ describe('applyColumns', () => {
     });
     // 720 twips — הרווח שהמסמך הריק נושא ושWord קובע ב-presets.
     expect(xml.get('s0')!.cols).toEqual({ num: 2, space: COLUMN_GAP_TWIPS, equalWidth: true });
+  });
+
+  it('מקטע לועזי אינו מקבל הודעה — שם הטורים מצוירים נכון', async () => {
+    const { host } = fakeEngine({ sectionDirection: 'ltr' });
+
+    expect(await applyColumns(host, 2)).toEqual({ ok: true });
+  });
+
+  it('חזרה לעמודה אחת אינה נושאת הודעה, כדי שהקודמת תנוקה', async () => {
+    // המעטפת מנקה את ההודעה כשמגיעה הצלחה בלעדיה (ראו tests/component/
+    // app-shell.test.ts). לכן היעדר ההודעה כאן הוא חלק מהחוזה ולא מקריות.
+    const { host } = fakeEngine();
+
+    expect(await applyColumns(host, 1)).toEqual({ ok: true });
   });
 
   it('מספר עמודות שאינו שלם חיובי נעצר לפני המנוע', async () => {
@@ -2326,5 +2346,53 @@ describe('createLineNumberingModel', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(readings).toEqual([]);
+  });
+});
+
+/**
+ * הניסוח עצמו, בלי מנוע.
+ *
+ * זו לא בדיקה של מחרוזת אלא של **מתי** אומרים אותה: הודעה שמופיעה במקטע לועזי
+ * או על עמודה אחת היא שקר שהמשתמש רואה, והיעדר הודעה על שתי עמודות בעברית
+ * משאיר אותו מול תצוגה שנראית שבורה בלי הסבר.
+ */
+describe('rtlColumnNote', () => {
+  const rtl = [{ sectionDirection: 'rtl' }];
+  const ltr = [{ sectionDirection: 'ltr' }];
+
+  it('שתי עמודות במקטע עברי — אומרים', () => {
+    expect(rtlColumnNote(2, rtl)).toBe(RTL_COLUMN_NOTE);
+    expect(rtlColumnNote(3, rtl)).toBe(RTL_COLUMN_NOTE);
+  });
+
+  it('עמודה אחת אינה מסודרת בטורים, ואין סדר שיכול להיות הפוך', () => {
+    expect(rtlColumnNote(1, rtl)).toBeUndefined();
+  });
+
+  it('מקטע לועזי מצויר נכון', () => {
+    expect(rtlColumnNote(2, ltr)).toBeUndefined();
+  });
+
+  it('מקטע עברי אחד מתוך כמה מספיק — הפעולה מוחלת על כולם', () => {
+    expect(rtlColumnNote(2, [...ltr, ...rtl])).toBe(RTL_COLUMN_NOTE);
+  });
+
+  it('כיוון חסר אינו נחשב עברי', () => {
+    // המנוע מחזיר `sectionDirection` רק כשהוא יודע. „לא ידוע” אינו „עברי”:
+    // הודעה על מסמך לועזי גרועה משתיקה על מסמך עברי, כי היא מתארת תקלה שאין.
+    expect(rtlColumnNote(2, [{}, { sectionDirection: undefined }])).toBeUndefined();
+  });
+
+  it('מסמך בלי מקטעים — אין על מה לדווח', () => {
+    expect(rtlColumnNote(2, [])).toBeUndefined();
+  });
+
+  it('ההודעה אינה ארוכה מהודעה שהפס כבר נושא', () => {
+    // `.status-item` ב-StatusBar.vue הוא `white-space: nowrap` **בלי**
+    // `overflow`/`text-overflow`, ולכן הודעה ארוכה מדי אינה מתקצרת בשלוש
+    // נקודות אלא דוחפת את הפס. 78 הוא אורך ההודעה הארוכה ביותר שכבר קיימת
+    // ב-App.vue („המסמך גדול מכדי לשמור ממנו עותק לשחזור…”), כלומר הרוחב
+    // שהפס כבר מוכח כמסוגל לשאת.
+    expect(RTL_COLUMN_NOTE.length).toBeLessThanOrEqual(78);
   });
 });

@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import InsertTab from '../../src/ui/ribbon/tabs/InsertTab.vue';
-import { autoUnmount, mountUi, settle } from './harness';
+import { autoUnmount, mountUi, settle, tipStartsSelector } from './harness';
 
 autoUnmount();
 
@@ -23,7 +23,7 @@ const MENU_ITEMS = [
   { label: 'מספר העמודים במסמך', instruction: 'NUMPAGES' },
 ] as const;
 
-const MENU_BUTTON = 'button[title^="הכנסת שדה מספר עמוד"]';
+const MENU_BUTTON = tipStartsSelector('הכנסת שדה מספר עמוד');
 
 describe('תפריט „מספר עמוד”', () => {
   it.each(MENU_ITEMS.map((item, index) => ({ index, ...item })))(

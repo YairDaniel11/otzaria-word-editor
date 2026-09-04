@@ -4,6 +4,28 @@
  * הלוגיקה הזאת יושבת מחוץ למעטפת בכוונה. היא קובעת אם עבודה של המשתמש נמחקת,
  * וקוד כזה חייב להיות נבדק — סבב ביקורת הראה שמוטציה שהחליפה את כל הזרימה
  * ב„פשוט תמחק” עברה את כל הבדיקות, כי המעטפת עצמה אינה מכוסה.
+ *
+ * ## שאלה אחת, שלוש תשובות — ולמה זה לא היה כך מלכתחילה
+ *
+ * `ui.showConfirm` של אוצריא הוא **דו-כפתורי**, ולכן הבחירה משלושה מצבים
+ * נבנתה כאן משתי שאלות רצופות: „לשמור?” ואחריה, למי שענה „לא”, „למחוק?”.
+ * זו לא הייתה גחמה — „לא לשמור” אינו „למחוק”, ומחיקה בלתי-הפיכה על תשובה
+ * שלילית אחת היא בדיוק הכשל שאין ממנו חזרה.
+ *
+ * שני דברים שינו את החשבון:
+ *
+ * 1. **הדיאלוג הוא שלנו.** `ui/panels/UnsavedChangesDialog.vue` מציג את
+ *    שלושת הכפתורים במכה אחת, ולכן אין יותר סיבה טכנית לפצל. מה שנשאר כאן
+ *    הוא `ask` — שאלה אחת שמחזירה `UnsavedChoice`, ולא `confirm` בוליאני.
+ * 2. **„לא לשמור” אינו בלתי-הפיך יותר.** לפני שהטיוטה נמחקת, המעטפת כותבת
+ *    עותק לגיבוי (`sessions/discard-backup.ts`, חמשת האחרונים). השאלה
+ *    השנייה הגנה מפני מחיקה שאין לה חזרה; מרגע שיש חזרה, היא רק עוד לחיצה
+ *    בין המשתמש למה שביקש. הגיבוי אינו מוזכר בדיאלוג — הוא רשת, לא הבטחה
+ *    שצריך לקרוא לפני שמחליטים — ומדובר עליו רק כשהוא נכשל.
+ *
+ * ההחלטה עצמה לא זזה: `save-first` עדיין מותנה בהצלחת השמירה, `cancel` עדיין
+ * ברירת המחדל לכל תשובה שאינה „שמור” או „לא לשמור”, ומסמך נקי עדיין אינו
+ * נשאל דבר.
  */
 
 export type SwitchDecision =
@@ -15,47 +37,59 @@ export type SwitchDecision =
   | { action: 'cancel'; reason: 'user' | 'saving' };
 
 /**
- * לשם מה נשאלת השאלה. שני המקרים חולקים את כל ההחלטה ונבדלים בנוסח בלבד,
- * ולכן הם פרמטר ולא פונקציה שנייה: זהו הקוד שקובע אם עבודה של המשתמש נמחקת,
- * ועותק שני שלו הוא עותק שני שיכול להתפצל בשקט.
+ * מה שהמשתמש בחר בדיאלוג. `cancel` הוא גם מה שחוזר כשהדיאלוג נסגר בלי בחירה
+ * (Esc, לחיצה על הרקע) — כלומר ברירת המחדל אינה הרסנית.
  */
-export type SwitchIntent = 'open-other' | 'exit';
+export type UnsavedChoice = 'save' | 'discard' | 'cancel';
 
-/** הנוסח לכל כוונה. שאלת המחיקה זהה בשתיהן, ולכן היא אינה כאן. */
-const WORDING: Record<SwitchIntent, { savePrompt: (name: string) => string; discardTitle: string }> =
-  {
-    'open-other': {
-      savePrompt: (name) => `לשמור את ${name} לפני פתיחת מסמך אחר?`,
-      discardTitle: 'לפתוח בלי לשמור?',
-    },
-    exit: {
-      savePrompt: (name) => `לשמור את ${name} לפני יציאה?`,
-      discardTitle: 'לצאת בלי לשמור?',
-    },
-  };
+/**
+ * מה שהדיאלוג מציג — שורה אחת ותו לא.
+ *
+ * אין `title`, ואין כותרת בחלון: השאלה עצמה היא כל התוכן, בדיוק כמו
+ * ב-Word („Do you want to save your changes to X?”). כותרת שאומרת „המסמך לא
+ * נשמר” מעל שאלה שאומרת את אותו דבר היא אותה אמירה פעמיים, והיא מרחיקה את
+ * השאלה מהכפתורים שעונים עליה.
+ */
+export interface UnsavedQuestion {
+  content: string;
+  /**
+   * האם „שמור” אפשרי בכלל.
+   *
+   * `false` לטאב ששוחזר וטרם נטען: אין בו מנוע, ולכן אין ממה לייצא. כפתור
+   * שאין מאחוריו מסלול ביצוע גרוע מכפתור שאינו מוצג.
+   */
+  canSave: boolean;
+}
+
+/**
+ * הנוסח. שם הקובץ בגרשיים — בלעדיהם שם שיש בו רווח או מילה שהיא גם פועל
+ * („שמור.docx”) נבלע במשפט, ואי אפשר לראות איפה הוא נגמר.
+ *
+ * זהה לכל המסלולים — מעבר מסמך, סגירת טאב ויציאה — ובכוונה: מה שהמשתמש צריך
+ * להכריע הוא מה יקרה לשינויים, וזה אותו דבר בשלושתם. מה שהוביל לשאלה כתוב על
+ * הכפתור שהוא הרגע לחץ עליו.
+ */
+export function unsavedQuestionText(name: string): string {
+  return `האם לשמור את השינויים שבוצעו בקובץ „${name}”?`;
+}
 
 export interface SwitchDeps {
   /** האם יש שינויים שלא נשמרו. */
   isDirty: () => boolean;
   /** האם שמירה רצה כרגע. */
   isSaving: () => boolean;
-  /** שאלת כן/לא למשתמש. `ui.showConfirm` הוא דו-כפתורי. */
-  confirm: (question: { title: string; content: string }) => Promise<boolean>;
+  /** שואלת את המשתמש, ומחזירה את מה שבחר. */
+  ask: (question: UnsavedQuestion) => Promise<UnsavedChoice>;
   /** שם המסמך הפתוח, להודעות. */
   documentName: () => string;
-  /** ברירת המחדל היא מעבר מסמך — הכוונה שהפונקציה נכתבה בשבילה. */
-  intent?: SwitchIntent;
 }
 
 /**
- * מה לעשות עם המסמך הפתוח לפני שמחליפים אותו או יוצאים ממנו.
+ * מה לעשות עם המסמך הפתוח לפני שמחליפים אותו, סוגרים אותו או יוצאים ממנו.
  *
- * שלושת המצבים נבנים משתי שאלות, כי ל-Host יש רק דיאלוג דו-כפתורי. „לא” על
- * הראשונה אינו „למחוק” — הוא רק „לא לשמור”, ולכן חייבת לבוא שאלה שנייה
- * שמאשרת את המחיקה במפורש.
- *
- * `intent` משנה נוסח בלבד. ההחלטה עצמה זהה בשני המקרים, וזו הסיבה שהיא כאן
- * ולא משוכפלת: „יציאה בלי לשמור” ו„פתיחה בלי לשמור” הם אותו סיכון בדיוק.
+ * פונקציה אחת לשלושתם, ולא שלוש: „יציאה בלי לשמור” ו„פתיחה בלי לשמור” הם
+ * אותו סיכון בדיוק, ועותק נוסף של הקוד שקובע אם עבודה נמחקת הוא עותק שיכול
+ * להתפצל בשקט.
  */
 export async function decideDocumentSwitch(deps: SwitchDeps): Promise<SwitchDecision> {
   // מעבר מסמך בזמן שמירה מותיר סבב שיסתיים על מסמך שכבר אינו פתוח. הקואורדינטור
@@ -63,20 +97,54 @@ export async function decideDocumentSwitch(deps: SwitchDeps): Promise<SwitchDeci
   if (deps.isSaving()) return { action: 'cancel', reason: 'saving' };
   if (!deps.isDirty()) return { action: 'switch' };
 
-  const name = deps.documentName();
-  const wording = WORDING[deps.intent ?? 'open-other'];
-  if (
-    await deps.confirm({
-      title: 'המסמך לא נשמר',
-      content: wording.savePrompt(name),
-    })
-  ) {
-    return { action: 'save-first' };
-  }
-
-  const discard = await deps.confirm({
-    title: wording.discardTitle,
-    content: `השינויים ב${name} יימחקו ואין דרך לשחזר אותם.`,
+  const choice = await deps.ask({
+    content: unsavedQuestionText(deps.documentName()),
+    canSave: true,
   });
-  return discard ? { action: 'switch' } : { action: 'cancel', reason: 'user' };
+
+  if (choice === 'save') return { action: 'save-first' };
+  // „לא לשמור” בלבד מחליף. כל תשובה אחרת — כולל דיאלוג שנסגר בלי בחירה —
+  // אינה מחיקה: פייל-קלוז, כמו שהיה כששתי השאלות היו בוליאניות.
+  if (choice === 'discard') return { action: 'switch' };
+  return { action: 'cancel', reason: 'user' };
+}
+
+/**
+ * סגירת טאב ששוחזר ועוד לא נטען — ראו `DocumentSession.pendingRestore`.
+ *
+ * ## למה זו החלטה נפרדת מ-`decideDocumentSwitch`
+ *
+ * לטאב כזה אין מסמך פתוח: אין `isDirty` מהמנוע, ואין מה לייצא — כלומר
+ * „לשמור קודם” אינו קיים כאן. מה שכן יש לו הוא **מצביע לטיוטה** ברשומה, ובה
+ * עבודה שלא נשמרה מההפעלה הקודמת; סגירת הטאב מוחקת אותה
+ * (`destroy({ removeDraft: true })`).
+ *
+ * לכן שאלה בלי „שמור” (`canSave: false`), ורק כשיש מה לאבד: בלעדיה לחיצה על
+ * „×” בטאב שהמשתמש עוד לא פתח הייתה מוחקת בשקט עבודה שהוא לא ראה מעולם —
+ * הכשל החמור ביותר שיש לתכונה הזאת, מפני שאין בו אפילו רגע שבו הוא יכול
+ * להבחין בו.
+ */
+export async function decidePendingTabClose(deps: {
+  /** האם לרשומה של הטאב יש טיוטה — כלומר עבודה שלא נשמרה. */
+  hasDraft: () => boolean;
+  ask: (question: UnsavedQuestion) => Promise<UnsavedChoice>;
+  documentName: () => string;
+}): Promise<SwitchDecision> {
+  if (!deps.hasDraft()) return { action: 'switch' };
+
+  const choice = await deps.ask({
+    /*
+     * לא „האם לשמור”: אין ממה לייצא, ושאלה שאין לה מסלול ביצוע גרועה משאלה
+     * שלא נשאלה. מה שנשאל הוא מה שבאמת עומד לקרות.
+     *
+     * ו„להמשיך” ולא „לסגור את הטאב”: אותה החלטה בדיוק נשאלת גם ביציאה
+     * (`resolveUnsavedBeforeClose` קורא לכאן בשני ה-intents), ונוסח שמדבר על
+     * טאב היה שקרי במחצית מהמקרים — בדיוק הסיבה ש-`unsavedQuestionText`
+     * בחרה בנוסח אחד לשלושת המסלולים.
+     */
+    content: `יש שינויים שלא נשמרו בקובץ „${deps.documentName()}”, והם עדיין לא נפתחו. להמשיך בלעדיהם?`,
+    canSave: false,
+  });
+
+  return choice === 'discard' ? { action: 'switch' } : { action: 'cancel', reason: 'user' };
 }

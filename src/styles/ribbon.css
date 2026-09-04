@@ -57,11 +57,19 @@
   background: var(--word-btn-hover);
 }
 
+/* אין כאן `font-weight` בכוונה, וזו הסרה ולא השמטה: `600` על הלשונית הפעילה
+   הרחיב אותה ברוחב ההדגשה, וכל שאר הלשוניות זזו הצידה — **בכל החלפה**. זו
+   הייתה החצי השני של „הקפיצות”, לצד גובה הרצועה (tokens.css).
+
+   הראיה שזה מה שקרה יושבת כמה שורות מכאן: `.otzaria-tab` מודגשת תמידית, ולכן
+   היא הלשונית היחידה שרוחבה לא השתנה מעולם.
+
+   ההדגשה גם אינה חסרה: ב-Word הלשונית הפעילה אינה מודגשת, והיא מסומנת בארבעה
+   סימנים אחרים שכולם כאן — הכרטיס הלבן, הגבול, צבע ה-primary, והפס התחתון. */
 .word-tab-btn.active {
   background: var(--color-surface);
   border-color: var(--color-outline-variant);
   border-bottom-color: var(--color-surface);
-  font-weight: 600;
   color: var(--color-primary);
   z-index: 2;
 }
@@ -114,22 +122,29 @@
 }
 
 /* תוכן ה-Ribbon — שורת הלחצנים מקבלת רקע surface נקי ונפרד משורות הנושא העליונות */
+/* `height` ולא `min-height`, וזה העיקר: `min-height` נתן לכל לשונית את הגובה
+   של הקבוצה הגבוהה **שלה**, והמסמך קפץ 30px במעבר מ„הפניות” ל„סקירה”. הגובה
+   כאן נגזר מטוקן אחד (tokens.css) ולכן זהה בכל שמונה הלשוניות, תמיד.
+
+   `scrollbar-width` הוסר מכאן: ב-Chromium הוא **מבטל** את ההתאמה של
+   `::-webkit-scrollbar`, ולכן הכלל שמתחת היה מת והפס האמיתי היה בעובי ברירת
+   המחדל. הרזרבה בטוקן (`--ribbon-scrollbar-h`) חייבת להיות בדיוק גובה הפס,
+   ולכן הפס חייב להיות זה שאנחנו מציירים. */
 .word-ribbon-body {
   display: flex;
   align-items: stretch;
-  padding: 4px 8px;
-  min-height: var(--ribbon-height);
+  padding: var(--ribbon-body-pad) 8px;
+  height: var(--ribbon-height);
   background: var(--color-surface);
-  border-block-end: 1px solid var(--color-outline-variant);
+  border-block-end: var(--ribbon-body-border) solid var(--color-outline-variant);
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
   gap: 0;
   width: 100%;
 }
 
 .word-ribbon-body::-webkit-scrollbar {
-  height: 4px;
+  height: var(--ribbon-scrollbar-h);
 }
 
 .word-ribbon-body::-webkit-scrollbar-thumb {
@@ -138,10 +153,16 @@
 }
 
 /* קבוצת פקדים (Group) */
+/* `flex-start` ולא `space-between`, יחד עם הגבהים הקבועים של שני הילדים:
+   הקבוצה עדיין נמתחת לגובה הרצועה (`align-items: stretch` בגוף) — וזה מה
+   שנותן למפריד `border-inline-end` גובה מלא — אבל התוכן והכותרת נשארים
+   צמודים למעלה בגובה ידוע. עם `space-between` העודף שנשמר לפס הגלילה היה
+   נדחף **בין** הפקדים לכותרת, והכותרת הייתה יורדת 4px בלשוניות שאינן גולשות
+   בלבד. כלומר: קפיצה חדשה במקום זו שתוקנה. */
 .word-ribbon-group {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding-inline: 8px;
   border-inline-end: 1px solid var(--word-group-border);
   min-width: max-content;
@@ -153,16 +174,36 @@
   border-inline-end: none;
 }
 
+/* קבוצה שנצמדת לקצה הרצועה (בעברית — שמאל), כמו „עזרה” ב-Word. `auto` על
+   פריט flex בולע את כל המרווח הפנוי, ולכן הוא דורש שיהיה מרווח פנוי: לשונית
+   שמשתמשת בזה חייבת `width: 100%` על `.ribbon-tab-pane` שלה, אחרת הפאנל
+   מתכווץ לרוחב תוכנו והמרווח הוא אפס. */
+.word-ribbon-group--end {
+  margin-inline-start: auto;
+}
+
+/* הקבוצה שלפני הנצמדת מאבדת את המפריד: אחריה יש פער ולא שכנה, וקו אנכי
+   שנשען על כלום נראה כמו שריד ולא כמו הפרדה. */
+.word-ribbon-group:has(+ .word-ribbon-group--end) {
+  border-inline-end: none;
+}
+
 /* אין כאן כלל רוחב לקבוצת „סגנונות” (.styles-group), בכוונה: המתיחה שהייתה
    כאן (flex: 1 1 300px עם max-width: 750px) פרסה אותה על חצי הרצועה והשאירה
    בתוכה משבצת כרטיס ריקה. כל קבוצה מחבקת את תוכנה. רצועה שנשארת ריקה מצד אחד
    בלשונית עם מעט קבוצות היא ההתנהגות של Word עצמו — לא חור שצריך למלא. */
 
+/* גובה קבוע ולא `flex: 1`: זה החוזה שכל הרצועה נשענת עליו — כל קבוצה, בכל
+   לשונית, תופסת בדיוק את אותו גובה. `--ribbon-content-h` הוא במדויק גם גובה
+   כפתור גדול וגם גובה מחסנית של שלושה קטנים, ולכן מחסנית של יותר משלושה
+   תגלוש. זה מכוון: תקרת השלוש היא הכלל, והיא נשמרת ב-
+   tests/unit/ribbon-geometry.test.ts. */
 .word-group-content {
   display: flex;
   align-items: center;
   gap: 3px;
-  flex: 1;
+  height: var(--ribbon-content-h);
+  flex: none;
 }
 
 .word-group-content.column-flow {
@@ -185,7 +226,7 @@
   justify-content: center;
   position: relative;
   padding-top: 1px;
-  height: 15px;
+  height: var(--ribbon-group-footer-h);
 }
 
 .word-group-title {
@@ -241,11 +282,13 @@
   cursor: default;
 }
 
+/* בדיוק גובה מחסנית של שלושה כפתורים קטנים — זה הכלל של Word, וכאן הוא נגזר
+   ולא נכתב: 68px מול 76px היה מה שגרם לשני דפוסי הרצועה לא להתיישר לעולם. */
 .word-btn.btn-large {
   flex-direction: column;
   padding: 4px 8px;
   min-width: 48px;
-  height: 68px;
+  height: var(--ribbon-content-h);
   gap: 2px;
   justify-content: center;
 }
@@ -254,9 +297,13 @@
   font-size: 11px;
 }
 
+/* 22px הוא מידה מדויקת ולא מרווחת: גבול 1 + ריפוד 2 + אייקון 16 + ריפוד 2 +
+   גבול 1. זה מכוון — זה גם הגובה של `RibbonSelect`, ולכן בורר ולחצן באותה
+   שורה („גופן” ב„בית”) מתיישרים סוף-סוף. אייקון גדול מ-16 בכפתור קטן יגלוש,
+   וזה התנאי שמחזיק את `--ribbon-content-h`. */
 .word-btn.btn-small {
   flex-direction: row;
-  height: 24px;
+  height: var(--ribbon-row-h);
   padding: 2px 6px;
   justify-content: flex-start;
   gap: 4px;
@@ -265,9 +312,66 @@
 
 .word-btn.btn-icon-only {
   width: 26px;
-  height: 24px;
+  height: var(--ribbon-row-h);
   padding: 0;
   border-radius: var(--radius-xs);
+}
+
+/* כפתור מפוצל: פעולה בלחיצה על הגוף, תפריט בלחיצה על החץ — התבנית של
+   „תבליטים” ו„מספור” ב-Word, ואותה תבנית שבורר הצבע כאן כבר משתמש בה
+   (ColorPickerPopover.vue). הכללים כאן ולא ב-`scoped` של RibbonMenuButton
+   מפני שהם צובעים את `.word-btn` שהקומפוננטה מקננת בתוכה, ו-`:deep` על
+   מחלקה גלובלית הוא רק דרך ארוכה יותר לומר את אותו דבר.
+
+   `overflow: hidden` ולא `border-radius` על הכפתורים הפנימיים: העיגול
+   שייך למעטפת, וכך הוא נכון גם ב-RTL בלי לכתוב פינות פיזיות פעמיים. */
+.word-split {
+  display: inline-flex;
+  align-items: stretch;
+  height: var(--ribbon-row-h);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  transition: background 0.08s, border-color 0.08s;
+}
+
+.word-split:hover {
+  background: var(--word-btn-hover);
+  border-color: var(--color-outline-variant);
+}
+
+/* התפריט פתוח — המעטפת כולה מסומנת, כמו ב-`.color-btn-wrapper.active`. */
+.word-split--open {
+  background: var(--word-btn-active);
+  border-color: var(--word-btn-active-border);
+}
+
+/* הכפתור הפנימי מוותר על הגבול והגובה שלו: המעטפת נותנת את שניהם, ו-22px
+   בתוך 22px היה גולש בגובה הגבול. */
+.word-split .word-btn {
+  border: 0;
+  border-radius: 0;
+  height: 100%;
+}
+
+.word-split .word-btn.btn-icon-only {
+  width: 24px;
+}
+
+.word-split__arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+}
+
+.word-split__arrow:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* @pointerdown.prevent על פקדי הרצועה שומר את הבחירה בעורך, ובמחיר הזה הכפתור

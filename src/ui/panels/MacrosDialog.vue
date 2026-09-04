@@ -14,7 +14,8 @@
         <button
           type="button"
           class="md-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את ניהול המאקרו"
           @click="$emit('close')"
         >
@@ -322,6 +323,153 @@
           </p>
         </div>
 
+        <!-- ═══ מאקרו VBA שבמסמך ═══ -->
+        <div
+          v-else-if="section === 'vba'"
+          class="md-body"
+        >
+          <p
+            class="md-note md-note--warn"
+            role="note"
+          >
+            אלה מאקרו ה-VBA שכבר נמצאים במסמך. הם <strong>אינם מורצים כאן</strong>
+            — אין מנוע VBA בדפדפן — ונשמרים בקובץ כמות שהם. הקוד מוצג לעיון, כדי
+            שאפשר יהיה להעביר אותו למאקרו של העורך.
+          </p>
+
+          <p
+            v-for="(warning, index) in documentVba.warnings"
+            :key="index"
+            class="md-note md-note--warn"
+            role="alert"
+          >
+            {{ warning }}
+          </p>
+
+          <div
+            v-if="vbaModules.length > 0"
+            class="md-input-row"
+          >
+            <label
+              for="md-vba-module"
+              class="md-label"
+            >מודול:</label>
+            <select
+              id="md-vba-module"
+              v-model="vbaModuleName"
+              class="md-input"
+            >
+              <option
+                v-for="module in vbaModules"
+                :key="module.name"
+                :value="module.name"
+              >
+                {{ module.name }} — {{ moduleKindLabel(module.kind) }}
+              </option>
+            </select>
+          </div>
+
+          <div
+            v-if="selectedVbaModule"
+            class="md-input-row md-input-row--top"
+          >
+            <label
+              for="md-vba-source"
+              class="md-label"
+            >קוד:</label>
+            <textarea
+              id="md-vba-source"
+              class="md-textarea md-textarea--code"
+              rows="10"
+              dir="ltr"
+              readonly
+              spellcheck="false"
+              :value="selectedVbaModule.source"
+            />
+          </div>
+
+          <p
+            v-else-if="documentVba.hasMacroPart"
+            class="md-note"
+            role="note"
+          >
+            לא נקרא אף מודול מפרויקט המאקרו של המסמך.
+          </p>
+          <p
+            v-else
+            class="md-note"
+            role="note"
+          >
+            במסמך הזה אין מאקרו VBA.
+          </p>
+        </div>
+
+        <!-- ═══ כלים מובנים ═══ -->
+        <div
+          v-else-if="section === 'tools'"
+          class="md-body"
+        >
+          <div
+            v-if="tools.length > 0"
+            class="md-list"
+            role="listbox"
+            aria-label="הכלים המובנים"
+          >
+            <button
+              v-for="item in tools"
+              :key="item.id"
+              type="button"
+              class="md-list-item"
+              :class="{ 'md-list-item--selected': item.id === selectedId }"
+              role="option"
+              :aria-selected="item.id === selectedId"
+              @pointerdown.prevent
+              @click="selectTool(item.id)"
+            >
+              <span class="md-item-name">{{ item.name }}</span>
+              <span class="md-item-meta">{{ item.shortcut ?? '' }}</span>
+            </button>
+          </div>
+          <p
+            v-else
+            class="md-note"
+            role="note"
+          >
+            אין כלים מובנים במסמך הזה.
+          </p>
+
+          <template v-if="selectedId && section === 'tools'">
+            <p
+              v-if="selectedToolDescription"
+              class="md-note"
+              role="note"
+            >
+              {{ selectedToolDescription }}
+            </p>
+            <div class="md-input-row">
+              <label
+                for="md-tool-shortcut"
+                class="md-label"
+              >קיצור מקלדת:</label>
+              <input
+                id="md-tool-shortcut"
+                v-model="itemShortcut"
+                type="text"
+                class="md-input"
+                placeholder="למשל: Ctrl+Alt+3 (רשות)"
+                :aria-invalid="shortcutInvalid"
+              >
+            </div>
+            <p
+              v-if="shortcutInvalid"
+              class="md-error"
+              role="alert"
+            >
+              {{ shortcutError }}
+            </p>
+          </template>
+        </div>
+
         <!-- ═══ ייבוא/ייצוא ═══ -->
         <div
           v-else
@@ -415,6 +563,35 @@
             </button>
           </template>
 
+          <!--
+            „VBA במסמך” אינה מוסיפה דבר ל-footer — „סגור” בלבד. במפורש ולא
+            דרך ה-`v-else`: בלי הענף הזה הלשונית הייתה מקבלת את כפתורי
+            הייבוא/ייצוא של „ייבוא וייצוא”, כלומר כפתור „ייבא” על לשונית
+            שכל עניינה הוא שהקוד הזה אינו נכנס לשום מקום.
+          -->
+          <template v-else-if="section === 'tools'">
+            <button
+              type="button"
+              class="md-btn md-btn-primary"
+              :disabled="!selectedId"
+              @pointerdown.prevent
+              @click="onRunTool"
+            >
+              הרץ
+            </button>
+            <button
+              type="button"
+              class="md-btn"
+              :disabled="!selectedId || shortcutInvalid"
+              @pointerdown.prevent
+              @click="onSaveToolShortcut"
+            >
+              שמור קיצור
+            </button>
+          </template>
+
+          <template v-else-if="section === 'vba'" />
+
           <template v-else>
             <button
               type="button"
@@ -435,8 +612,13 @@
             </button>
           </template>
 
+          <!--
+            `managesItems` ולא רשימת `!==`: כל לשונית חדשה שאינה מנהלת פריטים
+            של ה-kit הייתה מקבלת „מחק” בשקט. על „VBA במסמך” הכפתור הזה גם היה
+            שקר — אין שם מה למחוק, המאקרו שייכים לקובץ.
+          -->
           <button
-            v-if="section !== 'transfer'"
+            v-if="managesItems"
             type="button"
             class="md-btn"
             :disabled="!selectedId"
@@ -446,7 +628,7 @@
             מחק
           </button>
           <button
-            v-if="section !== 'transfer' && section !== 'recordings'"
+            v-if="managesItems && section !== 'recordings'"
             type="button"
             class="md-btn"
             @pointerdown.prevent
@@ -489,16 +671,22 @@
  * לא יופעל (הלקח של BookmarkDialog מול `normalizeBookmarkName`).
  */
 import { computed, ref, shallowRef, watch } from 'vue';
-import type { RecordedMacro, SavedScript, Snippet } from 'superdoc-macros';
+import type { BuiltinToolInfo, RecordedMacro, SavedScript, Snippet, VbaModule } from 'superdoc-macros';
 import type { MacrosHandle } from '../../engine/macros';
+import { MODULE_KIND_LABEL, NO_VBA, type DocumentVba } from '../../engine/vba-import';
 
 const props = withDefaults(
   defineProps<{
     isOpen?: boolean;
     /** מערכת המאקרו של המסמך הפתוח, או `null` כשאין מסמך. */
     handle?: MacrosHandle | null;
+    /**
+     * מאקרו ה-VBA שכבר במסמך — לתצוגה בלבד. תכונה של המסמך ולא של ה-kit,
+     * ולכן prop נפרד: אין שום מסלול שמריץ אותם או שומר אותם כפריט.
+     */
+    documentVba?: DocumentVba;
   }>(),
-  { isOpen: false, handle: null }
+  { isOpen: false, handle: null, documentVba: () => NO_VBA }
 );
 
 const emit = defineEmits<{
@@ -511,25 +699,73 @@ const DIALOG_TITLE = 'ניהול מאקרו';
 const SNIPPET_TEXT_PLACEHOLDER = 'הטקסט שיוכנס. אפשר לשלב {{date}}, {{time}}, {{selection}}';
 const SCRIPT_PLACEHOLDER = `await api.insertText('...');`;
 
-type Section = 'recordings' | 'snippets' | 'scripts' | 'transfer';
+type Section = 'recordings' | 'snippets' | 'scripts' | 'tools' | 'vba' | 'transfer';
 
 /**
  * לשונית הסקריפטים מוצגת רק כשהדגל דלוק (ראו SCRIPTS_FLAG_KEY ב-engine/macros.ts):
  * מאקרו כתובים נשארים feature flag עד שההקשחה תוכרע. הקלטות וקטעים — תמיד.
+ *
+ * לשונית „VBA במסמך” מוצגת רק כשיש מה להציג בה: היא מתארת את הקובץ שנפתח, ולא
+ * יכולת של העורך, ולשונית ריקה על מסמך רגיל הייתה רק מבלבלת.
  */
 const TABS = computed<ReadonlyArray<{ id: Section; title: string }>>(() => [
   { id: 'recordings', title: 'הקלטות' },
   { id: 'snippets', title: 'קטעי טקסט' },
   ...(props.handle?.scriptsEnabled ? [{ id: 'scripts' as const, title: 'סקריפטים' }] : []),
+  // „כלים” מוצגת רק כשהמעטפת רשמה כלים מובנים — kit בלי כלים הוא לשונית ריקה.
+  ...(tools.value.length > 0 ? [{ id: 'tools' as const, title: 'כלים' }] : []),
+  ...(props.documentVba.hasMacroPart ? [{ id: 'vba' as const, title: 'VBA במסמך' }] : []),
   { id: 'transfer', title: 'ייבוא וייצוא' },
 ]);
 
+/* ---------- VBA שבמסמך (קריאה בלבד) ---------- */
+
+const vbaModules = computed<readonly VbaModule[]>(() => props.documentVba.modules);
+
+/** המודול המוצג. `''` כשאין מודולים. */
+const vbaModuleName = ref('');
+
+function moduleKindLabel(kind: VbaModule['kind']): string {
+  return MODULE_KIND_LABEL[kind];
+}
+
+const selectedVbaModule = computed<VbaModule | null>(
+  () => vbaModules.value.find((module) => module.name === vbaModuleName.value) ?? null
+);
+
+/* מסמך אחר — מודולים אחרים. בלי האיפוס הבחירה הייתה מצביעה על מודול של המסמך
+   הקודם, והתיבה הייתה מוצגת ריקה בלי הסבר. */
+watch(
+  vbaModules,
+  (modules) => {
+    if (!modules.some((module) => module.name === vbaModuleName.value)) {
+      vbaModuleName.value = modules[0]?.name ?? '';
+    }
+  },
+  { immediate: true }
+);
+
 const section = ref<Section>('recordings');
+
+/**
+ * האם הלשונית הנוכחית מנהלת פריטים של ה-kit — כלומר האם „מחק”/„חדש” נכונים
+ * בה. „ייבוא וייצוא” ו„VBA במסמך” אינן: הראשונה עובדת על המצב כולו, והשנייה
+ * מציגה את הקובץ ואין בה מה למחוק.
+ */
+const managesItems = computed(
+  () => section.value === 'recordings' || section.value === 'snippets' || section.value === 'scripts'
+);
 
 /** הרשימות — תצלום מה-kit, מרוענן אחרי כל פעולה. ראו הערת הפתיחה. */
 const recordings = shallowRef<readonly RecordedMacro[]>([]);
 const snippets = shallowRef<readonly Snippet[]>([]);
 const scripts = shallowRef<readonly SavedScript[]>([]);
+/**
+ * הכלים המובנים שהמעטפת רשמה על ה-kit (registerShulchanTools). `TABS` קורא
+ * אותם אף שהוא מוגדר מעל: הוא `computed`, כלומר גופו רץ בקריאה הראשונה —
+ * הרבה אחרי שכל ההשמות של ה-setup הסתיימו.
+ */
+const tools = shallowRef<readonly BuiltinToolInfo[]>([]);
 
 /** הפריט הנבחר בלשונית הנוכחית, או `''`. */
 const selectedId = ref('');
@@ -550,6 +786,7 @@ function refresh(): void {
   recordings.value = kit ? [...kit.listRecordings()] : [];
   snippets.value = kit ? [...kit.listSnippets()] : [];
   scripts.value = kit ? [...kit.listScripts()] : [];
+  tools.value = kit && typeof kit.listTools === 'function' ? [...kit.listTools()] : [];
 }
 
 watch(
@@ -623,6 +860,18 @@ function selectSnippet(id: string): void {
   snippetText.value = item.text;
   snippetTrigger.value = item.trigger ?? '';
 }
+
+function selectTool(id: string): void {
+  const item = tools.value.find((entry) => entry.id === id);
+  if (!item) return;
+  selectedId.value = id;
+  itemName.value = item.name;
+  itemShortcut.value = item.shortcut ?? '';
+}
+
+const selectedToolDescription = computed(
+  () => tools.value.find((entry) => entry.id === selectedId.value)?.description ?? ''
+);
 
 function selectScript(id: string): void {
   const item = scripts.value.find((entry) => entry.id === id);
@@ -738,6 +987,24 @@ function onRunScript(): void {
     scriptResultIsError.value = !result.ok;
     scriptResult.value = result.ok ? 'המאקרו הסתיים בהצלחה' : result.message;
   });
+}
+
+function onRunTool(): void {
+  const kit = props.handle?.kit;
+  if (!kit || !selectedId.value) return;
+  void kit.runTool(selectedId.value).then((outcome) => {
+    // סיכום הצלחה מגיע לשורת המצב מהכלי עצמו (onSummary ברישום); כאן רק כשל.
+    if (!outcome.ok) emit('status', outcome.message, true);
+  });
+}
+
+function onSaveToolShortcut(): void {
+  const kit = props.handle?.kit;
+  if (!kit || !selectedId.value || shortcutInvalid.value) return;
+  guardedSave(() => {
+    kit.setToolShortcut(selectedId.value, itemShortcut.value.trim() || undefined);
+  });
+  refresh();
 }
 
 function onRemove(): void {
@@ -960,6 +1227,17 @@ function onImport(): void {
   font-size: 11px;
   line-height: 1.4;
   color: var(--color-on-surface-variant);
+}
+
+/**
+ * הערה שיש לקרוא, לא רק לראות: „הקוד הזה אינו רץ כאן” ואזהרות פרויקט המאקרו.
+ * צבע הטקסט הרגיל ופס בקצה ההתחלה — לא אדום: אין כאן כשל ואין מה לתקן, יש
+ * עובדה על הקובץ. אדום היה קורא למשתמש לחפש בעיה שאינה קיימת.
+ */
+.md-note--warn {
+  padding-inline-start: 8px;
+  border-inline-start: 2px solid var(--color-outline);
+  color: var(--color-on-surface);
 }
 
 .md-error {

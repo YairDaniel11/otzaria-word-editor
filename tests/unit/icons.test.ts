@@ -318,6 +318,53 @@ function pathPoints(d: string, sampleCurves = false): Point[] {
   return walkPath(d, sampleCurves).flatMap((sub) => sub.pts);
 }
 
+/**
+ * ה-`d` של כל path ב-SVG, עם ה-`transform` של ה-`<g>` שעוטף אותו אם יש כזה.
+ *
+ * הפירוק הזה נחוץ מרגע שיש בסט אייקון נגזר: התוכן של `toc` עטוף
+ * ב-`<g transform>` שמשקף אותו, וקוראת שאוספת `d=` בלבד מודדת את הקווים
+ * במקום שבו הם *לא* מצוירים. נמדד: `transform="translate(100 0)"` דוחף את כל
+ * התוכן מחוץ ל-viewBox — דף ריק בלי שורות על הכפתור — ועבר את כל הבדיקות
+ * כאן, כי אף אחת מהן לא הסתכלה על ה-transform.
+ */
+function pathsWithTransform(svg: string): { d: string; transform: string | null }[] {
+  const out: { d: string; transform: string | null }[] = [];
+  let transform: string | null = null;
+  for (const m of svg.matchAll(/<g\b[^>]*>|<\/g>|\sd="([^"]+)"/g)) {
+    if (m[0].startsWith('</g')) transform = null;
+    else if (m[0].startsWith('<g')) {
+      // רמה אחת בלבד. קינון היה מתקפל כאן ל-transform של ה-`<g>` הפנימי
+      // לבדו, כלומר מדידה שגויה בשקט — וזה בדיוק מה שאין לו זכות קיום כאן.
+      if (transform !== null) throw new Error('קינון <g> אינו נתמך במדידה');
+      transform = /transform="([^"]+)"/.exec(m[0])?.[1] ?? '';
+    } else out.push({ d: m[1]!, transform });
+  }
+  return out;
+}
+
+/**
+ * החלת `transform` על נקודות. נתמכים `translate` ו-`scale` בלבד, ומשורשרים
+ * מימין לשמאל כמו במפרט. כל דבר אחר **נזרק** ולא מוחזר כמו שהוא: transform
+ * שלא נמדד הוא בדיוק המצב שהבדיקות כאן קיימות כדי למנוע.
+ */
+function applyTransform(pts: Point[], transform: string | null): Point[] {
+  if (!transform) return pts;
+  const OP = /(translate|scale)\(\s*(-?[\d.]+)(?:[\s,]+(-?[\d.]+))?\s*\)/g;
+  const ops = [...transform.matchAll(OP)];
+  const rest = transform.replace(OP, '').trim();
+  if (!ops.length || rest !== '') throw new Error(`transform שאינו נתמך: ${transform}`);
+  let out = pts;
+  for (const op of ops.reverse()) {
+    const a = Number(op[2]);
+    const b = op[3] === undefined ? (op[1] === 'scale' ? a : 0) : Number(op[3]);
+    out =
+      op[1] === 'translate'
+        ? out.map((p) => ({ x: p.x + a, y: p.y + b }))
+        : out.map((p) => ({ x: p.x * a, y: p.y * b }));
+  }
+  return out;
+}
+
 interface Measured {
   viewBox: string | null;
   minX: number;
@@ -328,7 +375,9 @@ interface Measured {
 
 function measure(svg: string, sampleCurves = false): Measured {
   const vb = /viewBox="([^"]+)"/.exec(svg);
-  const pts = [...svg.matchAll(/\sd="([^"]+)"/g)].flatMap((m) => pathPoints(m[1]!, sampleCurves));
+  const pts = pathsWithTransform(svg).flatMap((p) =>
+    applyTransform(pathPoints(p.d, sampleCurves), p.transform)
+  );
   if (!pts.length) throw new Error('לא נמצא אף path באייקון');
   return {
     viewBox: vb ? vb[1]! : null,
@@ -459,6 +508,21 @@ describe('גבולות ה-viewBox', () => {
     expect(Math.min(...pts.map((p) => p.x))).toBeCloseTo(6, 2);
     expect(Math.min(...pts.map((p) => p.y))).toBeCloseTo(2, 2);
   });
+
+  it('המדידה מחילה את ה-transform של ה-`<g>` העוטף', () => {
+    // בלי זה השער שלמעלה עובר בירוק על אייקון שכל התוכן שלו נדחף מחוץ
+    // ל-viewBox: הקווים עצמם תקינים, וה-`transform` הוא מה שמזיז אותם. נמדד
+    // על `toc` — `translate(100 0)` במקום השיקוף נותן „ימין +94”.
+    const svg = (t: string) =>
+      `<svg viewBox="0 0 20 20"><g transform="${t}"><path d="M4 4h4v4h-4z"/></g></svg>`;
+    expect(measure(svg('translate(100 0)')).maxX).toBeCloseTo(108, 2);
+    // השיקוף של `toc`: סביב x=10, ולכן 4..8 הופך ל-12..16 והרוחב נשמר.
+    const mirrored = measure(svg('translate(20 0) scale(-1 1)'));
+    expect(mirrored.minX).toBeCloseTo(12, 2);
+    expect(mirrored.maxX).toBeCloseTo(16, 2);
+    // transform שלא נמדד נזרק, ולא מוחזר בשקט כאילו אינו קיים.
+    expect(() => measure(svg('rotate(90)'))).toThrow(/transform/);
+  });
 });
 
 /**
@@ -497,9 +561,12 @@ describe('סמנטיקה של הצורה', () => {
     // מוכר, ואין לנו אף פקד שזה תפקידו.
     const warnings: string[] = [];
     for (const name of NAMES) {
-      for (const match of ICONS[name]!.matchAll(/\sd="([^"]+)"/g)) {
-        for (const sub of walkPath(match[1]!)) {
-          const vertices = polygonVertices(sub);
+      for (const part of pathsWithTransform(ICONS[name]!)) {
+        for (const sub of walkPath(part.d)) {
+          const vertices = polygonVertices({
+            ...sub,
+            pts: applyTransform(sub.pts, part.transform),
+          });
           if (!vertices || vertices.length !== 3) continue;
           const w = (Math.max(...vertices.map((v) => v.x)) - Math.min(...vertices.map((v) => v.x))) / VB_W;
           const h = (Math.max(...vertices.map((v) => v.y)) - Math.min(...vertices.map((v) => v.y))) / VB_H;
@@ -680,21 +747,24 @@ describe('אתרי הקריאה לאייקונים', () => {
     // מגדלת, „מסמך חדש” הציג את לוגו האפליקציה, ו„שמור בשם” ו„ייצוא ל-Word”
     // הציגו את אותו אייקון בדיוק.
     // הנרמול אינו מתקן כשל: במאגר עצמו כל הקבצים LF, ובלעדיו הבדיקה עוברת.
-    // הוא הגנה על מי שיעבוד ב-Windows עם `core.autocrlf=true` — שם הקובץ
-    // נבדק ב-CRLF, וההשוואה למטה מצפה למפריד שורה יחיד בין המאפיינים.
+    // הוא הגנה על מי שיעבוד ב-Windows עם `core.autocrlf=true`.
     const fileTab = readFileSync(join(SRC, 'ui/ribbon/tabs/FileTab.vue'), 'utf8').replace(
       /\r\n/g,
       '\n'
     );
+    // הזיווג נמדד ב-`\s+` ולא ברווחי הזחה ספורים. הטענה כאן היא **איזה אייקון
+    // מוצמד לאיזו תווית**, וההזחה אינה חלק ממנה: פקד שיורד למחסנית
+    // (`RibbonStack`) מוזח רמה פנימה, וההשוואה שהייתה כאן נפלה על שתי רמות
+    // הזחה ולא על אייקון שגוי. שער שנשבר מסידור מחדש מלמד להתעלם ממנו.
     for (const [icon, label] of [
       ['newDoc', 'מסמך חדש'],
       ['folder', 'פתח קובץ'],
       ['save', 'שמור'],
       ['saveAs', 'שמור בשם...'],
-      ['export', 'ייצוא ל-Word'],
       ['exportPdf', 'ייצוא ל-PDF'],
     ] as const) {
-      expect(fileTab, label).toContain(`icon="${icon}"\n        label="${label}"`);
+      const quoted = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      expect(fileTab, label).toMatch(new RegExp(`icon="${icon}"\\s+label="${quoted}"`));
     }
     const icons = [...fileTab.matchAll(/icon="([A-Za-z]+)"/g)].map((m) => m[1]!);
     expect(new Set(icons).size, 'אין אייקון כפול בלשונית קובץ').toBe(icons.length);
@@ -708,7 +778,11 @@ describe('אתרי הקריאה לאייקונים', () => {
   it('אין שני אייקונים עם אותו path בכלל', () => {
     const byPath = new Map<string, string[]>();
     for (const name of NAMES) {
-      const paths = [...ICONS[name]!.matchAll(/\sd="([^"]+)"/g)].map((m) => m[1]).join('|');
+      // כולל ה-`transform`, כדי ששני אייקונים שההבדל היחיד ביניהם הוא שיקוף
+      // לא ייחשבו כפילות.
+      const paths = pathsWithTransform(ICONS[name]!)
+        .map((p) => `${p.transform ?? ''}:${p.d}`)
+        .join('|');
       byPath.set(paths, [...(byPath.get(paths) ?? []), name]);
     }
     const dupes = [...byPath.values()].filter((g) => g.length > 1).map((g) => g.join(' = '));

@@ -14,7 +14,20 @@ import {
   type ContextMenuSection,
   type ContextMenuSnapshot,
 } from '../../src/ui/menu/context-menu-model';
-import { autoUnmount, mountUi, type Harness } from './harness';
+import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
+import { createFontMemory } from '../../src/composables/use-font-controls';
+import RibbonCombo from '../../src/ui/ribbon/common/RibbonCombo.vue';
+import type { PickerOption } from '../../src/composables/picker-value';
+import {
+  autoUnmount,
+  createCommandDouble,
+  createSuperdocDouble,
+  mountUi,
+  pickerValue,
+  setPicker,
+  settle,
+  type Harness,
+} from './harness';
 
 autoUnmount();
 
@@ -23,6 +36,7 @@ function sections(over: Partial<ContextMenuSnapshot> = {}): readonly ContextMenu
     hasDocument: true,
     hasRange: true,
     storyType: 'body',
+    misspelledWord: null,
     can: () => true,
     ...over,
   });
@@ -49,6 +63,27 @@ function buttonById(harness: Harness, id: string) {
   return button;
 }
 
+/** תיבת הבורר שבכרטיס, לפי הטולטיפ שלה. */
+function boxInCard(harness: Harness, tip: string) {
+  const box = harness.wrapper.find(`input[role="combobox"][data-tip-title="${tip}"]`);
+  if (!box.exists()) throw new Error(`אין תיבה בכרטיס עם הטולטיפ „${tip}”`);
+  return box;
+}
+
+/** האפשרויות שהתיבה בכרטיס קיבלה — הצורה שלהן, ולא רק מה שנצבע ממנה. */
+function optionsOf(harness: Harness, tip: string): readonly PickerOption[] {
+  const combo = harness.wrapper
+    .findAllComponents(RibbonCombo)
+    .find((instance) => instance.props('title') === tip);
+  if (!combo) throw new Error(`אין בורר בכרטיס עם הכותרת „${tip}”`);
+  return combo.props('options') as readonly PickerOption[];
+}
+
+/** הערכים שברשימה הנפתחת, בסדר שבו הם מצוירים. */
+function rowValues(harness: Harness): (string | undefined)[] {
+  return harness.wrapper.findAll('[role="option"]').map((row) => row.attributes('data-value'));
+}
+
 describe('ContextMenu', () => {
   let harness: Harness;
 
@@ -58,8 +93,9 @@ describe('ContextMenu', () => {
 
   it('מצייר את המקטעים כתפריט נגיש', () => {
     expect(harness.wrapper.attributes('role')).toBe('menu');
-    expect(harness.wrapper.findAll('[role="group"]')).toHaveLength(5);
-    expect(harness.wrapper.findAll('[role="separator"]')).toHaveLength(4);
+    // שישה: לוח, גופן, עיצוב, הוספה, אוצריא, עריכה.
+    expect(harness.wrapper.findAll('[role="group"]')).toHaveLength(6);
+    expect(harness.wrapper.findAll('[role="separator"]')).toHaveLength(5);
   });
 
   it('מתג מדווח menuitemcheckbox, ופעולה מדווחת menuitem', async () => {
@@ -187,12 +223,15 @@ describe('ContextMenu', () => {
 
   /**
    * שורה שכתוב בה „קישור…” ולצדה „Ctrl+K” אינה צריכה כרטיס טולטיפ שאומר
-   * „קישור…”. `TooltipLayer` מרים כרטיס לכל פקד עם `title`, ולכן ההימנעות היא
-   * מה-`title` עצמו ולא מהשכבה.
+   * „קישור…”, ולכן היא אינה מצהירה על `data-tip-*` כלל — מה שהופך פקד לעוגן.
+   * `title` אינו נבדק כאן כי הוא אינו קיים באף אלמנט בתוכנה
+   * (tests/unit/native-title.test.ts).
    */
-  it('לשורת כתיבה אין title — התווית כבר על המסך', () => {
-    expect(buttonById(harness, 'link').attributes('title')).toBeUndefined();
-    expect(buttonById(harness, 'bold').attributes('title')).toBe('מודגש (Ctrl+B)');
+  it('לשורת כתיבה אין טולטיפ — התווית כבר על המסך', () => {
+    expect(buttonById(harness, 'link').attributes('data-tip-title')).toBeUndefined();
+    expect(buttonById(harness, 'bold').attributes('data-tip-title')).toBe('מודגש');
+    expect(buttonById(harness, 'bold').attributes('data-tip-shortcut')).toBe('Ctrl+B');
+    expect(buttonById(harness, 'bold').attributes('aria-label')).toBe('מודגש (Ctrl+B)');
   });
 
   it('תווית הקיצור מוצגת ב-LTR', () => {
@@ -200,5 +239,296 @@ describe('ContextMenu', () => {
 
     expect(shortcut.attributes('dir')).toBe('ltr');
     expect(shortcut.text()).toBe('Ctrl+K');
+  });
+});
+
+/**
+ * שורת הגופן.
+ *
+ * מה שנמדד כאן הוא הדבר שבגללו היא נבנתה כך ולא אחרת: הערך שהיא מציגה אינו
+ * שלה. `FONT_MEMORY` מסופק מהמעטפת (App.vue) לרצועה ולתפריט גם יחד, ובדיקה
+ * שמוסרת אותו זיכרון לשתי ההרכבות היא הבדיקה היחידה שיכולה לתפוס חזרה לעותק
+ * פרטי — מצב שבו התפריט מציג „Assistant 12” בזמן שהרצועה מציגה את גופן המסמך.
+ */
+describe('שורת הגופן בתפריט ההקשר', () => {
+  it('מציגה את מה שהמנוע מדווח על הבחירה', async () => {
+    const adapter = createCommandDouble();
+    adapter.setState('font-family', { value: 'TaameyDavidCLM' });
+    adapter.setState('font-size', { value: 20 });
+
+    const menu = open(sections(), { adapter });
+    await settle();
+
+    expect(pickerValue(menu.wrapper, 'גופן')).toBe('TaameyDavidCLM');
+    expect(pickerValue(menu.wrapper, 'גודל גופן')).toBe('20');
+  });
+
+  it('בחירת גופן מגיעה למנוע עם payload שהוא מאשר, וסוגרת את הכרטיס', async () => {
+    const menu = open();
+    await settle();
+
+    await setPicker(menu.wrapper, 'גופן', 'TaameyDavidCLM');
+    await settle();
+
+    expect(menu.adapter.payloads('font-family')).toEqual(['TaameyDavidCLM']);
+    expect(menu.adapter.rejected).toEqual([]);
+    expect(menu.wrapper.emitted('close')).toHaveLength(1);
+  });
+
+  /**
+   * גודל שאינו בסולם של Word הוא הסיבה שהתיבה היא תיבת ערך ולא בורר סגור,
+   * וההתנהגות הזאת חייבת להיות זהות לזו שברצועה — היא מגיעה מאותו `normalize`.
+   */
+  it('גודל שהוקלד ואינו ברשימה מוחל, ואינו נעלם לטובת ההתאמה הראשונה', async () => {
+    const menu = open();
+    await settle();
+
+    await setPicker(menu.wrapper, 'גודל גופן', '13');
+    await settle();
+
+    expect(menu.adapter.payloads('font-size')).toEqual([13]);
+  });
+
+  it('מה שהרצועה מציגה הוא מה שהתפריט מציג — זיכרון אחד לשניהם', async () => {
+    const fontMemory = createFontMemory();
+    const adapter = createCommandDouble();
+
+    const ribbon = mountUi(HomeTab, { adapter, fontMemory });
+    await settle();
+    await setPicker(ribbon.wrapper, 'גופן', 'TaameyDavidCLM');
+    await settle();
+    expect(pickerValue(ribbon.wrapper, 'גופן')).toBe('TaameyDavidCLM');
+
+    // המנוע אינו מדווח ערך (כמו מיד אחרי שהתפריט הזיז את הסמן), ולכן זה בדיוק
+    // המצב שבו עותק פרטי היה נופל לברירת המחדל.
+    const menu = open(sections(), { adapter, fontMemory });
+    await settle();
+
+    expect(pickerValue(menu.wrapper, 'גופן')).toBe('TaameyDavidCLM');
+  });
+
+  /**
+   * Y-PLONI#14 סעיף א, בתת-המקרה „בחרתי את מה שכבר היה”.
+   *
+   * `RibbonCombo.choose()` פולט `done` תמיד ו-`update:modelValue` רק כשהערך
+   * **שונה** — ולכן כרטיס שהאזין להחלה בלבד נשאר פתוח בדיוק במקרה הזה: מילה
+   * ב-Arial, פתיחת הרשימה, לחיצה על „Arial”. המיקוד נשאר ב-`input`, וההקלדה
+   * הבאה נכנסה לתיבת הגופן ולא למסמך.
+   *
+   * הסגירה **היא** מה שמחזיר את המיקוד (`App.vue`, `closeContextMenu`), ולכן
+   * זו הפליטה שנמדדת כאן.
+   */
+  it('בחירת הגופן שהתיבה כבר מציגה סוגרת את הכרטיס, אף שאין מה להחיל', async () => {
+    const menu = open();
+    await settle();
+    expect(pickerValue(menu.wrapper, 'גופן')).toBe('Assistant');
+
+    const box = boxInCard(menu, 'גופן');
+    await box.trigger('focus');
+    await settle();
+
+    const current = menu.wrapper
+      .findAll('[role="option"]')
+      .find((row) => row.attributes('data-value') === 'Assistant');
+    expect(current).toBeDefined();
+    await current?.trigger('pointerdown');
+    await settle();
+
+    // שום דבר לא הוחל — הערך זהה — ובכל זאת הכרטיס נסגר פעם אחת בדיוק.
+    expect(menu.adapter.payloads('font-family')).toEqual([]);
+    expect(menu.wrapper.emitted('close')).toHaveLength(1);
+  });
+
+  /**
+   * המקבילה של „וגם אחרי Escape בתיבה” שבבדיקת הרצועה
+   * (tests/component/picker-state.test.ts): `RibbonCombo` עוצר את `Escape`
+   * ופולט `done`, ובלי מאזין ה-`Escape` הראשון נבלע — כלומר נדרש שני.
+   */
+  it('Escape בתיבה שבכרטיס סוגר אותו, בלי להחיל דבר', async () => {
+    const menu = open();
+    await settle();
+
+    const box = boxInCard(menu, 'גודל גופן');
+    await box.trigger('focus');
+    await box.trigger('keydown', { key: 'Escape' });
+    await settle();
+
+    expect(menu.adapter.payloads('font-size')).toEqual([]);
+    expect(menu.wrapper.emitted('close')).toHaveLength(1);
+  });
+
+  /**
+   * שני חצאים של אותו באג, ושניהם נראו רק מרגע שבורר הגודל הפך מ-`<select>`
+   * לרשימה נפתחת: `preview` הוא `font-family` של CSS, ורשימה מספרית שהערך
+   * הנוכחי בראשה אינה סולם.
+   */
+  it('גודל שאינו בסולם נכנס במקומו לפי הסדר, ובלי לטעון שהוא גופן', async () => {
+    const adapter = createCommandDouble();
+    adapter.setState('font-size', { value: 13 });
+
+    const menu = open(sections(), { adapter });
+    await settle();
+    expect(pickerValue(menu.wrapper, 'גודל גופן')).toBe('13');
+
+    const added = optionsOf(menu, 'גודל גופן').find((option) => option.value === '13');
+    expect(added).toBeDefined();
+    expect(added?.preview).toBeUndefined();
+
+    await boxInCard(menu, 'גודל גופן').trigger('focus');
+    await settle();
+
+    const values = rowValues(menu);
+    expect(values).toContain('13');
+    expect(values).toEqual([...values].sort((a, b) => Number(a) - Number(b)));
+    expect(values[values.indexOf('13') - 1]).toBe('12');
+    expect(values[values.indexOf('13') + 1]).toBe('14');
+  });
+
+  /** ובבורר הגופן `preview` כן שם — שם שאינו ברשימה מוצג בגופן של עצמו. */
+  it('גופן שאינו ברשימה נוסף בראשה, ומוצג בגופן עצמו', async () => {
+    const adapter = createCommandDouble();
+    adapter.setState('font-family', { value: 'Guttman Yad' });
+
+    const menu = open(sections(), { adapter });
+    await settle();
+
+    const options = optionsOf(menu, 'גופן');
+    expect(options[0]).toMatchObject({ value: 'Guttman Yad', preview: 'Guttman Yad' });
+  });
+
+  it('גופן שהוחל מהתפריט מופיע ברצועה מיד', async () => {
+    const fontMemory = createFontMemory();
+    const adapter = createCommandDouble();
+
+    const ribbon = mountUi(HomeTab, { adapter, fontMemory });
+    const menu = open(sections(), { adapter, fontMemory });
+    await settle();
+
+    await setPicker(menu.wrapper, 'גופן', 'TaameyDavidCLM');
+    await settle();
+
+    expect(pickerValue(ribbon.wrapper, 'גופן')).toBe('TaameyDavidCLM');
+  });
+});
+
+/**
+ * זיכרון הבוררים והחלפת מסמך.
+ *
+ * שתי שכבות הזיכרון (`FONT_MEMORY`) קיימות בשביל רגע אחד: המנוע אינו מדווח
+ * ערך — בחירה מעורבת, או בחירה שטרם נפתרה — ואז הבורר מציג את „האחרון שידענו”
+ * במקום להתרוקן. ההצדקה שלהן היא שהערך נמדד **באותו מסמך**, ובהחלפה היא
+ * נופלת: הזיכרון של הספר שנסגר אינו ידיעה על הטאב שנפתח, והרגע שבו הוא מוצג
+ * הוא בדיוק הרגע הנפוץ — מסמך טרי, לפני שהבחירה התיישבה.
+ *
+ * ההחלפה נעשית כאן בשני צעדים, כמו במעטפת: `session` חדש הוא **אדפטר** חדש
+ * (`useCommand` מנקה אז את ההחזקה שלו — ראו composables/useCommand.ts), ומונה
+ * `DOCUMENT_GENERATION` עולה. בלי שני הצעדים אין מה למדוד: ההחזקה של הקריאה
+ * הייתה מציגה את הערך הישן במקום הזיכרון, ושתי התקלות היו מתחפשות זו לזו.
+ */
+describe('החלפת מסמך', () => {
+  it('מאפסת את זיכרון הבוררים — הכרטיס אינו מציג את הגופן של המסמך הקודם', async () => {
+    const first = createCommandDouble();
+    const menu = open(sections(), { adapter: first });
+    await settle();
+
+    // הדיווח **אחרי** ההרכבה, ולא כמצב פתיחה: זה מה שכותב לזיכרון. מצב שהיה
+    // שם עוד לפני שהבורר עלה אינו „שינוי”, ואף watch אינו רואה אותו.
+    first.setState('font-family', { value: 'TaameyDavidCLM' });
+    first.setState('font-size', { value: 20 });
+    await settle();
+    expect(pickerValue(menu.wrapper, 'גופן')).toBe('TaameyDavidCLM');
+    expect(pickerValue(menu.wrapper, 'גודל גופן')).toBe('20');
+
+    // מסמך אחר, ועליו המנוע עדיין שותק — כלומר הזיכרון הוא כל מה שיש.
+    await menu.setAdapter(createCommandDouble());
+    await menu.setSuperdoc(createSuperdocDouble());
+    await settle();
+
+    expect(pickerValue(menu.wrapper, 'גופן')).toBe('Assistant');
+    expect(pickerValue(menu.wrapper, 'גודל גופן')).toBe('12');
+  });
+});
+
+/**
+ * כרטיס שנפתח למעלה.
+ *
+ * לחיצה בתחתית החלון — סוף הטקסט, כלומר המקום הנפוץ ביותר — אינה מותירה מקום
+ * מתחתיה, והכרטיס מתהפך: הקצה **התחתון** שלו נוגע בסמן. בסדר הרגיל זה מרחיק
+ * מהסמן בדיוק את מה שצמוד אליו בפתיחה למטה — שורת הלוח, שורת הגופן ושורת
+ * העיצוב — ומחייב לחזור עם העכבר לאורך כל הכרטיס.
+ */
+describe('כרטיס שנפתח למעלה', () => {
+  /** רק שמות המקטעים, בסדר שבו הם מצוירים. */
+  function groups(harness: Harness): (string | undefined)[] {
+    return harness.wrapper.findAll('[role="group"]').map((group) => group.attributes('aria-label'));
+  }
+
+  it('בפתיחה למטה הסדר הוא זה של הדגם', async () => {
+    const down = open(sections(), { props: { point: { x: 400, y: 200 } } });
+    await nextTick();
+
+    expect(groups(down)[0]).toBe('לוח');
+    expect(groups(down)[1]).toBe('גופן');
+  });
+
+  it('בפתיחה למעלה סדר המקטעים מתהפך, והאייקונים יורדים ליד הסמן', async () => {
+    const up = open(sections(), { props: { point: { x: 400, y: window.innerHeight - 3 } } });
+    await nextTick();
+
+    const order = groups(up);
+    expect(order[order.length - 1]).toBe('לוח');
+    expect(order[order.length - 2]).toBe('גופן');
+    expect(order[0]).toBe('עריכה');
+  });
+
+  /**
+   * ההיפוך לבדו דוחף אל **מתחת לקו** בדיוק את מה שהוא נועד לקרב.
+   *
+   * לכרטיס יש `max-height` שנגזר מהמקום שמעל הנקודה, ו-`overflow-y: auto`.
+   * מה שצמוד לסמן יושב אחרי ההיפוך בסוף ה-DOM, ו-`scrollTop: 0` מראה את הקצה
+   * הרחוק. נמדד ב-Chrome על ה-dist בחלון 756×413: `scrollHeight: 326` מול
+   * `clientHeight: 268`, ו„הוסף למילון” — הפריט היחיד בכרטיס שנוגע במילה
+   * שנלחצה — נחתך לגמרי; לחיצה לפי המלבן שלו נחתה על המסמך
+   * (`scripts/qa/spellcheck-qa.mjs` ירד ל-11/12).
+   *
+   * ב-jsdom אין פריסה, ולכן `scrollHeight` מוזרק: מה שנמדד כאן הוא ההשמה
+   * עצמה, כלומר שהכרטיס נגלל אל הקצה ולא נשאר על אפס.
+   */
+  it('כרטיס שנגלל נפתח על הקצה הצמוד לסמן, ולא על הרחוק', async () => {
+    const up = open(sections(), { props: { point: { x: 400, y: window.innerHeight - 3 } } });
+    const card = up.wrapper.find('[role="menu"]').element as HTMLElement;
+    Object.defineProperty(card, 'scrollHeight', { configurable: true, value: 326 });
+    Object.defineProperty(card, 'clientHeight', { configurable: true, value: 268 });
+
+    // המדידה קובעת את הצד, וההיפוך נכנס ל-DOM אחריה; הגלילה באה אחרי שניהם.
+    await nextTick();
+    await nextTick();
+
+    expect(card.scrollTop, 'הקצה שצמוד לסמן הוא מה שנראה').toBe(326);
+  });
+
+  it('בפתיחה למטה הכרטיס נשאר בראש — שם הקצה הצמוד לסמן הוא הראשון', async () => {
+    const down = open(sections(), { props: { point: { x: 400, y: 200 } } });
+    const card = down.wrapper.find('[role="menu"]').element as HTMLElement;
+    Object.defineProperty(card, 'scrollHeight', { configurable: true, value: 326 });
+
+    await nextTick();
+    await nextTick();
+
+    expect(card.scrollTop).toBe(0);
+  });
+
+  /**
+   * החץ למטה חייב להזיז מיקוד למה שנמצא למטה **על המסך**, ולא למה שהמודל בנה
+   * אחריו — אחרת בכרטיס שהתהפך הוא מזיז אותו למעלה.
+   */
+  it('החצים עוברים בסדר שעל המסך, ולא בסדר הדגם', async () => {
+    const up = open(sections(), { props: { point: { x: 400, y: window.innerHeight - 3 } } });
+    // המדידה קובעת את הצד, והחץ אחריה: לפניה הכרטיס עדיין מצויר בסדר הרגיל.
+    await nextTick();
+    await up.wrapper.trigger('keydown', { key: 'ArrowDown' });
+    await nextTick();
+
+    expect(document.activeElement).toBe(buttonById(up, 'find').element);
   });
 });

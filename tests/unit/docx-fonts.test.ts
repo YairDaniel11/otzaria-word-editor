@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   FONT_ALIAS_STYLE_ID,
   installDocumentFontAliases,
+  coversHebrew,
   isFamilyAvailable,
   parseFontTable,
   planFontAliases,
@@ -178,6 +179,197 @@ describe('substitutesFor', () => {
     // FrankRuhlCLM הוא הגופן שאוצריא אורזת, וזה מה שהופך אותו לתחליף שאפשר
     // לקבל את הבייטים שלו גם במכונה ריקה.
     expect(substitutesFor(hebrewFont({ family: 'roman' }))).toContain('FrankRuhlCLM');
+  });
+});
+
+describe('coversHebrew', () => {
+  it('בלי canvas אינו מבטיח כיסוי — ההפך מ-isFamilyAvailable, ובכוונה', () => {
+    // שם שהדפדפן פותר אינו בהכרח שם שיש בו אות עברית. הבורר מצייר דגימה של
+    // אותיות עבריות לפי התשובה הזאת, ודגימה שלא נמדדה היא דגימה שעלולה
+    // להיות של גופן אחר לגמרי — לכן כאן „בלי מדידה” פירושו „לא מבטיחים”.
+    expect(coversHebrew('David')).toBe(false);
+    expect(coversHebrew('גופן שאינו קיים בשום מקום')).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* coversHebrew — המדידה עצמה, על canvas מדומה                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * למה canvas מדומה, ולא jsdom ולא הדפדפן.
+ *
+ * jsdom אינו מודד כלום, ולכן `coversHebrew` שם מחזירה `false` לפני שהיא
+ * מגיעה למדידה — כלומר אי אפשר לבדוק שם את הלוגיקה בכלל. canvas אמיתי היה
+ * בודק את הגופנים שמותקנים במכונה שמריצה את הבדיקה, ולא את הקוד.
+ *
+ * מה שהמדמה מחקה הוא בדיוק מה שנמדד בכרום ב-Windows, ושתי העובדות שהוא
+ * מחזיק הן מה שהכריע את התיקון:
+ *
+ *   1. התאמת הגופן ב-CSS היא לכל תו בנפרד: שרשרת `"F", B` על אות עברית
+ *      שאין ב-F נופלת ל-B, ולכן מודדת בדיוק כמו `B` לבדו.
+ *   2. ברירת המחדל לעברית של `serif` **ושל** `monospace` היא Times New
+ *      Roman — של `serif` מפני שכך הוגדר בכרום, ושל `monospace` מפני
+ *      ש-Courier New אינו מכסה עברית ונופל בעצמו ל-fallback המערכתי. ורק
+ *      של `sans-serif` היא Arial.
+ *
+ * מכאן שגופן שהוא עצמו ברירת מחדל של בסיס — Times New Roman — נמדד זהה מול
+ * שני הבסיסים הראשונים, ורק השלישי מבדיל אותו.
+ */
+const HEBREW_DEFAULT_OF_BASE: Record<string, string> = {
+  monospace: 'Times New Roman',
+  serif: 'Times New Roman',
+  'sans-serif': 'Arial',
+};
+
+/** רוחב מדומה לכל גופן. השונות היא כל מה שהמדידה קוראת. */
+const PROBE_WIDTH: Record<string, number> = {
+  'Times New Roman': 100,
+  Arial: 111,
+  Narkisim: 122,
+  FrankRuhlCLM: 133,
+};
+
+interface FontProbe {
+  covers: (name: string) => boolean;
+  install: (fontTableXml: string | null) => Promise<string[]>;
+  /** כמה מדידות רוחב נעשו בפועל — כך נראה מה נשמר במפה ומה נמדד מחדש. */
+  measurements: () => number;
+  /** מה שהדפדפן „מכיר” כרגע. ההזרקה של המסמך משנה את זה. */
+  hebrew: Set<string>;
+  restore: () => void;
+}
+
+/**
+ * מודול טרי עם canvas מדומה. טרי בכל בדיקה, כי גם ה-context וגם מפת הכיסוי
+ * הם מצב ברמת המודול.
+ */
+async function fontProbe(hebrew: readonly string[]): Promise<FontProbe> {
+  const known = new Set(hebrew);
+  let measurements = 0;
+
+  const context = {
+    font: '',
+    measureText(text: string) {
+      measurements += 1;
+      const parsed = /^72px (?:"(.*)", )?([a-z-]+)$/.exec(context.font);
+      if (!parsed || text.length === 0) return { width: 0 };
+      const [, name, base] = parsed;
+      const drawn = name !== undefined && known.has(name) ? name : HEBREW_DEFAULT_OF_BASE[base];
+      return { width: PROBE_WIDTH[drawn] ?? 100 };
+    },
+  };
+
+  const realCreate = document.createElement.bind(document);
+  const stub = vi.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+    const el = realCreate(tag);
+    if (tag === 'canvas') (el as unknown as { getContext: () => unknown }).getContext = () => context;
+    return el;
+  }) as typeof document.createElement);
+
+  vi.resetModules();
+  const fonts = await import('../../src/engine/docx-fonts');
+
+  return {
+    covers: fonts.coversHebrew,
+    install: fonts.installDocumentFontAliases,
+    measurements: () => measurements,
+    hebrew: known,
+    restore: () => stub.mockRestore(),
+  };
+}
+
+describe('coversHebrew — שלושת הבסיסים', () => {
+  it('`Times New Roman` מכסה עברית — ומול שני בסיסים בלבד הוא נמדד `false`', async () => {
+    // הדוגמה שהתיעוד עצמו מביא („Arial ו-Times New Roman מכסים עברית”)
+    // נמדדה `false` בכרום. הסיבה אינה באג בקוד אלא בבסיסים: `serif`
+    // ב-Windows הוא Times New Roman, ו-`monospace` נופל אליו בעצמו.
+    const probe = await fontProbe(['Times New Roman', 'Arial', 'Narkisim']);
+    try {
+      expect(probe.covers('Times New Roman')).toBe(true);
+    } finally {
+      probe.restore();
+    }
+  });
+
+  it('וגם `Arial` — ברירת המחדל של הבסיס השלישי — נשאר `true`', async () => {
+    // התיקון אינו מחליף פינה אחת באחרת: Arial מזוהה דרך שני הבסיסים
+    // הראשונים, בדיוק כמו קודם.
+    const probe = await fontProbe(['Times New Roman', 'Arial', 'Narkisim']);
+    try {
+      expect(probe.covers('Arial')).toBe(true);
+      expect(probe.covers('Narkisim')).toBe(true);
+    } finally {
+      probe.restore();
+    }
+  });
+
+  it('גופן בלי עברית נשאר `false` — הבסיס השלישי אינו מייצר חיובי-שגוי', async () => {
+    // Wingdings, Webdings, Symbol, Marlett, Cambria Math והגופנים
+    // המזרח-אסיאתיים נמדדו שליליים בכרום, וכך הם נשארים: שרשרת `"F", B` על
+    // אות עברית שאין ב-F נופלת ל-B ומודדת בדיוק כמוהו — בכל אחד משלושת
+    // הבסיסים.
+    const probe = await fontProbe(['Times New Roman', 'Arial']);
+    try {
+      for (const name of [
+        'Wingdings',
+        'Webdings',
+        'Symbol',
+        'Marlett',
+        'Cambria Math',
+        'MS Gothic',
+        'גופן שאינו מותקן',
+      ]) {
+        expect(probe.covers(name)).toBe(false);
+      }
+    } finally {
+      probe.restore();
+    }
+  });
+});
+
+describe('coversHebrew — המפתח שהתשובה נשמרת תחתיו', () => {
+  it('רישיות אינה מייצרת רשומה שנייה ומדידה שנייה', async () => {
+    // `familyKey` ב-font-options.ts ממותת, ולכן `Arial`/`ARIAL`/`arial` הם
+    // אפשרות אחת בבורר — בזמן שהמפה כאן מדדה אותם שלוש פעמים.
+    const probe = await fontProbe(['Arial']);
+    try {
+      expect(probe.covers('Arial')).toBe(true);
+      const afterFirst = probe.measurements();
+      expect(afterFirst).toBeGreaterThan(0);
+
+      expect(probe.covers('ARIAL')).toBe(true);
+      expect(probe.covers('  arial  ')).toBe(true);
+      expect(probe.measurements()).toBe(afterFirst);
+    } finally {
+      probe.restore();
+    }
+  });
+
+  it('הזרקת אליאסים של מסמך מפילה את הזיכרון — לשני הכיוונים', async () => {
+    // `installDocumentFontAliases` דורס את `@font-face` בכל מסמך, ולכן
+    // התשובה כן משתנה תוך ההפעלה. בלי דור במפתח:
+    //   • גופן שנפתר רק דרך האליאס נמדד `false` לפני ההזרקה ונשאר מסווג
+    //     „בלי עברית” לכל ההפעלה (נמדד בדפדפן: FrankRuhlCLM=false);
+    //   • ו-`true` שנמדד בזכות מסמך א' נשאר אחרי שמסמך ב' דרס את הסגנון —
+    //     ואז הדגימה נצבעת ב-fallback, בדיוק מה שהדגל קיים כדי למנוע.
+    tryCallMock.mockResolvedValue(null);
+    const probe = await fontProbe([]);
+    try {
+      expect(probe.covers('FrankRuhlCLM')).toBe(false);
+
+      // מסמך א': ההזרקה הביאה את הגופן.
+      probe.hebrew.add('FrankRuhlCLM');
+      await probe.install(null);
+      expect(probe.covers('FrankRuhlCLM')).toBe(true);
+
+      // מסמך ב': הסגנון נדרס, והגופן אינו נפתר יותר.
+      probe.hebrew.delete('FrankRuhlCLM');
+      await probe.install(null);
+      expect(probe.covers('FrankRuhlCLM')).toBe(false);
+    } finally {
+      probe.restore();
+    }
   });
 });
 

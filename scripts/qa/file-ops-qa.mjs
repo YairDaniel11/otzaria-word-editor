@@ -39,7 +39,7 @@ const INSTRUMENT = `
 <script>
 (function () {
   var wait = function () { return new Promise(function (r) { setTimeout(r, 30); }); };
-  var seen = (window.__qaFile = { uploads: 0, printed: 0, downloads: [], commits: [] });
+  var seen = (window.__qaFile = { uploads: 0, printed: 0, commits: [] });
 
   function install() {
     if (!window.__qaHost) return setTimeout(install, 20);
@@ -74,16 +74,6 @@ const INSTRUMENT = `
   };
 
   window.print = function () { seen.printed++; };
-
-  // ההורדה: אנחנו רוצים לדעת שהיא נקראה ומה שמה, בלי לכתוב לדיסק.
-  var click0 = HTMLAnchorElement.prototype.click;
-  HTMLAnchorElement.prototype.click = function () {
-    if (this.hasAttribute('download')) {
-      seen.downloads.push(this.getAttribute('download'));
-      return;
-    }
-    return click0.apply(this, arguments);
-  };
 })();
 </script>
 `;
@@ -204,27 +194,6 @@ await stage('save-as', async (app) => {
   calls.includes('fs.commitUserFileWrite')
     ? report.pass('שמור בשם', `commit עם „${seen.commits[0]?.suggestedName}”`)
     : report.fail('שמור בשם', JSON.stringify(calls));
-});
-
-await stage('export', async (app) => {
-  await app.caret(0);
-  await app.type('exporttest');
-  await sleep(1_000);
-  await app.reset();
-
-  await app.tab('קובץ');
-  await app.click('ייצוא ל-Word', { after: 3_000 });
-  let seen = null;
-  for (let i = 0; i < 15; i++) {
-    seen = await file(app);
-    if (seen.downloads.length) break;
-    await sleep(1_000);
-  }
-  const status = await app.status();
-  console.log(`  הורדות: ${JSON.stringify(seen.downloads)} | שורת מצב: ${JSON.stringify(status)}`);
-  seen.downloads.length
-    ? report.pass('ייצוא ל-Word', `שם הקובץ „${seen.downloads[0]}”`)
-    : report.fail('ייצוא ל-Word', `לא נוצרה הורדה. שורת מצב: ${status.text}`);
 });
 
 await stage('print', async (app) => {

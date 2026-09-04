@@ -4,7 +4,7 @@
     <div class="titlebar-start">
       <div
         class="word-app-badge"
-        title="וורד לאוצריא"
+        data-tip-title="וורד לאוצריא"
       >
         <SvgIcon
           name="word"
@@ -24,7 +24,7 @@
         :class="{ active: autosaveEnabled }"
         role="switch"
         :aria-checked="autosaveEnabled"
-        :title="autosaveEnabled ? 'שמירה אוטומטית לדיסק — פועלת' : 'שמירה אוטומטית לדיסק — כבויה'"
+        :data-tip-title="autosaveEnabled ? 'שמירה אוטומטית לדיסק — פועלת' : 'שמירה אוטומטית לדיסק — כבויה'"
         @click="$emit('toggle-autosave')"
       >
         <span class="autosave-label">שמירה אוטומטית</span>
@@ -39,7 +39,10 @@
           type="button"
           class="qa-btn"
           :disabled="isSaving"
-          :title="saveTitle"
+          data-tip-title="שמור"
+          :data-tip-desc="isDirty ? 'ישנם שינויים שלא נשמרו' : undefined"
+          :data-tip-shortcut="label('save')"
+          :aria-label="saveTitle"
           @pointerdown.prevent
           @click="$emit('save')"
         >
@@ -55,7 +58,9 @@
         <button
           type="button"
           class="qa-btn"
-          :title="`בטל ${label('undo')}`"
+          data-tip-title="בטל"
+          :data-tip-shortcut="label('undo')"
+          :aria-label="`בטל ${label('undo')}`"
           :disabled="!canUndo"
           @pointerdown.prevent
           @click="$emit('undo')"
@@ -68,7 +73,9 @@
         <button
           type="button"
           class="qa-btn"
-          :title="`חזור ${label('redo')}`"
+          data-tip-title="חזור"
+          :data-tip-shortcut="label('redo')"
+          :aria-label="`חזור ${label('redo')}`"
           :disabled="!canRedo"
           @pointerdown.prevent
           @click="$emit('redo')"
@@ -88,38 +95,27 @@
           :style="{ width: `${docTitleWidthCh(title)}ch` }"
           spellcheck="false"
           aria-label="שם המסמך"
-          title="לחץ לעריכת שם המסמך"
+          data-tip-title="לחץ לעריכת שם המסמך"
           @change="$emit('update-title', ($event.target as HTMLInputElement).value)"
         >
         <span class="app-suffix">- Word</span>
         <span
           v-if="isDirty"
           class="dirty-indicator"
-          title="שינויים לא שמורים"
+          data-tip-title="שינויים לא שמורים"
         >•</span>
       </div>
     </div>
 
-    <!--
-      מרכז: חיפוש („Tell Me” ב-Word). `button` ולא `input readonly`: השדה שהיה
-      כאן נראה כמו מקום להקליד בו ולא הגיב להקלדה, וה-`@click` יושב על ה-div
-      העוטף — כלומר המקלדת לא הגיעה אליו בכלל.
-    -->
+    <!-- מרכז: חיפוש אפשרויות ופקודות („Tell Me” ב-Word) -->
     <div class="titlebar-center">
-      <button
-        type="button"
-        class="search-box"
-        aria-label="חיפוש והחלפה במסמך"
-        :title="`חיפוש והחלפה ${label('find')}`"
-        @click="$emit('open-find')"
-      >
-        <SvgIcon
-          name="search"
-          :size="14"
-          class="search-icon"
-        />
-        <span class="search-placeholder">חפש</span>
-      </button>
+      <TellMeSearch
+        ref="tellMeRef"
+        @open-find="(q) => $emit('open-find', q)"
+        @run-command="(id, payload) => $emit('run-command', id, payload)"
+        @run-action="(action) => $emit('run-action', action)"
+        @custom-action="(action) => $emit('custom-action', action)"
+      />
     </div>
 
     <!-- צד שמאל (סיום): מצב השמירה -->
@@ -136,10 +132,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import type { TellMeCustomAction } from './tell-me-actions';
+import { ref, computed } from 'vue';
 import SvgIcon from '../icons/SvgIcon.vue';
+import TellMeSearch from './TellMeSearch.vue';
 import { docTitleWidthCh } from '../../composables/shell-format';
-import { shortcutLabel, type ShortcutId } from '../shortcuts/registry';
+import { shortcutLabel, type ShortcutId, type ShellAction } from '../shortcuts/registry';
 
 const props = withDefaults(
   defineProps<{
@@ -164,6 +162,8 @@ const props = withDefaults(
   }
 );
 
+const tellMeRef = ref<InstanceType<typeof TellMeSearch> | null>(null);
+
 /**
  * הצירוף בא מהרג'יסטרי, לא ממחרוזת כתובה כאן. סרגל הגישה המהירה הכריז שנתיים
  * „בטל Ctrl+Z” בלי שאיש קשר את הצירוף — וזה בדיוק סוג ההבטחה שהרג'יסטרי בא
@@ -183,10 +183,17 @@ defineEmits<{
   (e: 'save'): void;
   (e: 'undo'): void;
   (e: 'redo'): void;
-  (e: 'open-find'): void;
+  (e: 'open-find', initialQuery?: string): void;
+  (e: 'run-command', id: string, payload?: unknown): void;
+  (e: 'run-action', action: ShellAction): void;
+  (e: 'custom-action', action: TellMeCustomAction): void;
   (e: 'toggle-autosave'): void;
   (e: 'update-title', newTitle: string): void;
 }>();
+
+defineExpose({
+  focusTellMe: () => tellMeRef.value?.focus(),
+});
 </script>
 
 <style scoped>
@@ -406,7 +413,7 @@ defineEmits<{
   line-height: 1;
 }
 
-/* מרכז: חיפוש */
+/* מרכז: חיפוש אפשרויות ופקודות (Tell Me) */
 .titlebar-center {
   justify-self: center;
   display: flex;
@@ -414,38 +421,7 @@ defineEmits<{
   /* אותה הנמקה כמו titlebar-start/end: בלי זה תיבת החיפוש נשארת ברוחב המועדף שלה במקום לרדת עם העמודה. */
   min-width: 0;
   width: 100%;
-  overflow: hidden;
-}
-
-.search-box {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-outline-variant);
-  border-radius: var(--radius-md);
-  padding: 4px 12px;
-  width: 320px;
-  max-width: 100%;
-  cursor: text;
-  color: var(--color-on-surface-variant);
-  font-family: var(--font-main);
-  font-size: 12px;
-  transition: border-color 0.1s, box-shadow 0.1s;
-}
-
-.search-box:hover {
-  border-color: var(--word-blue);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-}
-
-.search-icon {
-  color: var(--color-on-surface-variant);
-  flex-shrink: 0;
-}
-
-.search-placeholder {
-  color: var(--color-on-surface-variant);
+  position: relative;
 }
 
 .titlebar-end {
@@ -491,12 +467,7 @@ defineEmits<{
 
 @media (max-width: 560px) {
   /* מוריד את הרוחב המועדף של תיבת החיפוש, כדי שהיא תוותר על מקום לפני שהיא נדחקת בכוח. */
-  .search-placeholder {
-    display: none;
-  }
-
-  .search-box {
-    padding-inline: 8px;
+  .tell-me-container {
     min-width: 0;
   }
 }

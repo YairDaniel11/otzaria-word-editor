@@ -7,7 +7,7 @@
       { active: active }
     ]"
     :disabled="disabled"
-    :title="computedTitle"
+    :aria-label="accessibleName"
     :data-tip-title="tip.title"
     :data-tip-shortcut="tip.shortcut || undefined"
     :data-tip-desc="tip.description || undefined"
@@ -84,19 +84,33 @@ const iconSize = computed(() => {
   return 18;
 });
 
-const computedTitle = computed(() => {
+/**
+ * השם שקורא מסך מכריז — ורק כשאין תווית גלויה.
+ *
+ * כאן היה `title`, וזאת הייתה שגיאה כפולה. ראשית `title` הוא מה שמצייר את
+ * המלבן האפור של מערכת ההפעלה מעל הכרטיס המעוצב (ההסבר המלא ב-tooltip-content.ts).
+ * שנית הוא ערבב שני דברים: מה שהעכבר מגלה, ומה שקורא מסך מכריז.
+ *
+ * ההפרדה משפרת גם את הנגישות עצמה. `undefined` בווריאנטים שיש בהם `<span
+ * class="btn-label">` הוא בכוונה: לכפתור כזה כבר יש שם מהתוכן שלו, ו-`aria-label`
+ * היה **דורס** אותו — כלומר גם מוסיף לו את הצירוף כרעש („מודגש Ctrl+B”), וגם
+ * שובר שליטה קולית, שמצפה שהשם יהיה מה שכתוב על הכפתור. `title` לא עשה זאת, כי
+ * הוא נדחק לסוף התור של חישוב השם; `aria-label` נמצא בראשו.
+ *
+ * בכפתור אייקון אין תוכן, ולכן שם ה-`aria-label` הוא כל מה שיש — כולל הצירוף,
+ * שהוא מידע ולא רעש כשאין דרך אחרת לדעת אותו.
+ */
+const accessibleName = computed<string | undefined>(() => {
+  if (props.label && props.variant !== 'icon-only') return undefined;
+
   const base = menuString(props.tooltip || props.label || '');
-  if (!props.shortcutId) return base;
+  if (!props.shortcutId) return base || undefined;
   return `${base} (${shortcutLabel(props.shortcutId)})`;
 });
 
 /**
  * שלושת שדות הטולטיפ המעוצב, כתכונות `data-tip-*` שהשכבה קוראת
- * (ui/tooltip/TooltipLayer.vue).
- *
- * `title` נשאר לצדן ואינו מוחלף: הוא השם הנגיש של כפתור חסר תווית, והוא הנפילה
- * לאחור אם השכבה אינה מורכבת. השכבה היא שמכבה אותו — היא מסירה אותו מהעוגן
- * הפעיל בלבד, כדי שמערכת ההפעלה לא תצייר טולטיפ שני מעל הכרטיס.
+ * (ui/tooltip/TooltipLayer.vue). הן, ולא `title`, מה שהופך את הכפתור לעוגן.
  */
 const tip = computed(() =>
   tipParts({

@@ -20,11 +20,18 @@
  * אחד, הדף השני נבנה עם האובייקט הזה כזרע — וכל מה שלא נכתב דרך ה-SDK פשוט
  * אינו קיים שם. כך אי אפשר לעבור את השער „במקרה”, דרך זיכרון שנשאר.
  *
- * ארבע השאלות שהשער עונה עליהן:
+ * שש השאלות שהשער עונה עליהן:
  *   1. הטקסט שנכתב — חזר?
  *   2. מקום הסמן — חזר?
  *   3. גודל התצוגה — חזר?
  *   4. הלשונית ברצועה — חזרה?
+ *   5. **כל** הטאבים שהיו פתוחים — חזרו לרצועה?
+ *   6. הטאב שלא נטען בעלייה — נפתח עם התוכן שלו כשעוברים אליו?
+ *
+ * שתי האחרונות נוספו אחרי שהתגלה שסגירת התוסף עם שני מסמכים פתוחים החזירה
+ * אחד: הרשומה כן נשמרה במלואה, אבל העלייה קראה ממנה את הטאב הפעיל בלבד.
+ * שתיהן חייבות להיות כאן ולא בבדיקת jsdom: ה„טאב השני” נשען על טיוטה שעברה
+ * ייצוא DOCX אמיתי ועל מנוע שני שנפתח בפועל.
  *
  *   npm run build && npm run check:session
  */
@@ -43,6 +50,9 @@ const OPEN_MS = 60_000;
 
 /** הטקסט שנכתב בהפעלה הראשונה. עברית בכוונה — היא מה שעובר את השרשרת. */
 const TYPED = 'שחזור';
+
+/** הטקסט שנכתב בטאב השני. שונה מהראשון — כך „איזה מסמך חזר” אינו ניחוש. */
+const TYPED_SECOND = 'שני';
 
 /** גודל התצוגה שנקבע בהפעלה הראשונה. */
 const ZOOM = 150;
@@ -165,6 +175,57 @@ function instrument(seed) {
     return JSON.stringify({ text: text, zoom: zoom, caret: caret, tab: tab });
   };
 
+  /**
+   * שורת הטקסט הראשונה **הנראית**. עם כמה טאבים פתוחים יש כמה פאנלים ב-DOM
+   * ורק אחד מהם גלוי (display:none על השאר, App.vue), ולכן querySelector
+   * סתמי היה מחזיר שורה של טאב מוסתר — מלבן אפס, כלומר לחיצה לשום מקום.
+   *
+   * בלי גרש-אחורי בהערה הזאת בכוונה: הכל נמצא בתוך template literal.
+   */
+  P.visibleLine = function () {
+    var lines = document.querySelectorAll('.superdoc-line, .superdoc-fragment');
+    for (var i = 0; i < lines.length; i++) {
+      var rect = lines[i].getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        return JSON.stringify({
+          x: Math.round(rect.x + Math.min(20, rect.width / 2)),
+          y: Math.round(rect.y + rect.height / 2),
+        });
+      }
+    }
+    return 'none';
+  };
+
+  /** רצועת הטאבים כפי שהיא נראית: כותרת לכל טאב, ומי מהם פעיל. */
+  P.tabs = function () {
+    var out = [];
+    var tabs = document.querySelectorAll('.word-doctab');
+    for (var i = 0; i < tabs.length; i++) {
+      var title = tabs[i].querySelector('.word-doctab-title');
+      out.push({
+        title: title ? title.textContent.trim() : '',
+        active: tabs[i].classList.contains('active'),
+      });
+    }
+    return JSON.stringify(out);
+  };
+
+  /** „+” ברצועת הטאבים. */
+  P.newTab = function () {
+    var button = document.querySelector('.word-doctabs-new');
+    if (!button) return false;
+    button.click();
+    return true;
+  };
+
+  /** מעבר לטאב לפי מיקומו. */
+  P.selectDocumentTab = function (index) {
+    var tabs = document.querySelectorAll('.word-doctab');
+    if (!tabs[index]) return false;
+    tabs[index].click();
+    return true;
+  };
+
   /** בוחרת לשונית ברצועה לפי התווית שלה. */
   P.selectTab = function (label) {
     var tabs = document.querySelectorAll('.word-tab-btn');
@@ -207,14 +268,7 @@ async function waitForDocument(cdp) {
  * ב-textarea מוסתר, ולחיצה על שטח ריק ממקדת אותו בלי לפתור יעד בחירה.
  */
 async function clickIntoText(cdp) {
-  const line = await cdp.evaluate(
-    '(function(){' +
-      'var l = document.querySelector(".superdoc-line") || document.querySelector(".superdoc-fragment");' +
-      'if (!l) return "none";' +
-      'var r = l.getBoundingClientRect();' +
-      'return JSON.stringify({ x: Math.round(r.x + Math.min(20, r.width / 2)), y: Math.round(r.y + r.height / 2) });' +
-      '})()',
-  );
+  const line = await cdp.evaluate('window.__probe.visibleLine()');
   if (line === 'none') throw new Error('לא נמצאה שורת טקסט במסמך — אין לאן למקם סמן');
   const at = JSON.parse(line);
 
@@ -274,6 +328,41 @@ try {
     }
     notes.push(`הפעלה 1: טקסט ${JSON.stringify(before.text.trim().slice(0, 30))}, זום ${before.zoom}, לשונית ${before.tab}, סמן ${JSON.stringify(before.caret)}`);
 
+    // ---------------------------------------------------------------------
+    // טאב שני, ובו טקסט משלו. מכאן והלאה השאלה היא „כמה מסמכים חוזרים”.
+    // ---------------------------------------------------------------------
+    if (!(await cdp.evaluate('window.__probe.newTab()'))) {
+      failures.push('לא נמצא הכפתור „+” ברצועת הטאבים');
+    } else {
+      await sleep(3_000);
+      await clickIntoText(cdp);
+      await typeText(cdp, TYPED_SECOND);
+      await sleep(1_500);
+
+      const secondBack = JSON.parse(await cdp.evaluate('window.__probe.readback()'));
+      if (!secondBack.text.includes(TYPED_SECOND)) {
+        failures.push(
+          `ההקלדה לא נכנסה לטאב השני (התקבל ${JSON.stringify(secondBack.text.slice(0, 40))})`,
+        );
+      }
+      const openTabs = JSON.parse(await cdp.evaluate('window.__probe.tabs()'));
+      if (openTabs.length !== 2) failures.push(`ציפינו לשני טאבים פתוחים, נמדדו ${openTabs.length}`);
+      notes.push(`הפעלה 1: ${openTabs.length} טאבים, טקסט בשני ${JSON.stringify(secondBack.text.trim().slice(0, 30))}`);
+
+      /**
+       * חזרה לטאב הראשון לפני היציאה, ובכוונה.
+       *
+       * ארבע השאלות המקוריות — טקסט, סמן, זום, לשונית — נשאלות בהפעלה 2 על
+       * הטאב **הפעיל**, וגודל התצוגה הוא תכונה של המסמך (`documentViewFor`).
+       * בלי החזרה הזאת הן היו נמדדות על המסמך השני, שלא כוונו בו לא זום ולא
+       * סמן, ו„הזום לא חזר” היה מדווח על מסמך שמעולם לא היה בו זום אחר.
+       */
+      if (!(await cdp.evaluate('window.__probe.selectDocumentTab(0)'))) {
+        failures.push('המעבר חזרה לטאב הראשון נכשל');
+      }
+      await sleep(1_500);
+    }
+
     // „המשתמש עזב”. אותו אירוע בדיוק שאוצריא מייצרת כשהיא מפרקת את הדף.
     await cdp.evaluate('window.dispatchEvent(new Event("pagehide"))');
 
@@ -295,22 +384,45 @@ try {
   failures.push(`ההפעלה הראשונה נכשלה: ${error.message}`);
 }
 
+/**
+ * רשומת המסמך הפעיל מתוך רשומה שמורה. הצורה (`version: 2`, session-state.ts)
+ * היא אוסף `documents` עם `activeId` — לא `document`/`caret` שטוחים כמו
+ * לפני ריבוי המסמכים. השער הזה בודק מסמך יחיד, ולכן הפעיל הוא תמיד היחיד.
+ */
+function activeDocumentEntry(record) {
+  return record.documents?.find((entry) => entry.id === record.activeId) ?? null;
+}
+
 if (saved) {
   const files = Object.keys(saved.files ?? {});
   if (files.length === 0) failures.push('לא נכתבה טיוטה כלל — אין מה לשחזר');
   if (!saved.storage?.session) failures.push('לא נכתבה רשומת הפעלה');
   else {
     const record = JSON.parse(saved.storage.session);
+    const entry = activeDocumentEntry(record);
     notes.push(
       `נשמר: טיוטה ${files.join(', ') || '—'}; זום ${record.view?.zoom}; ` +
-        `לשונית ${record.view?.ribbonTab}; סמן ${JSON.stringify(record.caret?.start ?? null)}`,
+        `לשונית ${record.view?.ribbonTab}; סמן ${JSON.stringify(entry?.caret?.start ?? null)}`,
     );
+
+    // הרשומה תמיד שמרה את כל הטאבים; מה שנשבר היה הקריאה שלה בעלייה. בלי
+    // הבדיקה כאן, כשל בשאלה „שני טאבים חזרו” היה מעורפל בין השניים.
+    if ((record.documents?.length ?? 0) !== 2) {
+      failures.push(`הרשומה נשמרה עם ${record.documents?.length ?? 0} מסמכים במקום שניים`);
+    }
+    if (Object.keys(saved.files ?? {}).length !== 2) {
+      failures.push(`ציפינו לשתי טיוטות — אחת לכל טאב — ונכתבו ${Object.keys(saved.files ?? {}).length}`);
+    }
   }
 }
 
 // ---------------------------------------------------------------------------
 // הפעלה שנייה: רק מה שנכתב דרך ה-SDK עובר לכאן.
 // ---------------------------------------------------------------------------
+/** רצועת הטאבים כפי שחזרה, ומה שנקרא מהטאב שלא היה פעיל. */
+let restoredTabs = [];
+let otherTabText = null;
+
 if (saved && failures.length === 0) {
   try {
     const { cdp, close } = await openPage(buildPage(PAGE_TWO, saved), { label: 'session-2' });
@@ -318,6 +430,30 @@ if (saved && failures.length === 0) {
       await waitForDocument(cdp);
       await sleep(3_000);
       restored = JSON.parse(await cdp.evaluate('window.__probe.readback()'));
+      restoredTabs = JSON.parse(await cdp.evaluate('window.__probe.tabs()'));
+
+      /**
+       * הטאב שלא נטען בעלייה — טעינה עצלה, App.vue restoreTabs. הוא קיים
+       * ברצועה מהרגע הראשון, והמסמך שלו נפתח כאן, ברגע שעוברים אליו. זו
+       * השאלה השישית, והיא המבדילה בין טאב מצויר לבין טאב שבאמת חזר.
+       */
+      const otherIndex = restoredTabs.findIndex((tab) => !tab.active);
+      if (otherIndex < 0) {
+        failures.push('אין טאב שני ברצועה בהפעלה השנייה');
+      } else {
+        await cdp.evaluate(`window.__probe.selectDocumentTab(${otherIndex})`);
+        // פתיחה מלאה של מנוע שני: קריאת הטיוטה, preflight, ובניית המסמך.
+        for (let waited = 0; waited < OPEN_MS; waited += 500) {
+          await sleep(500);
+          const ready = await cdp.evaluate(
+            '(function(){ var s = window.__otzariaEditor; return !!(s && s.superdoc); })()',
+          );
+          if (ready) break;
+        }
+        await sleep(2_500);
+        otherTabText = JSON.parse(await cdp.evaluate('window.__probe.readback()')).text;
+      }
+
       secondLog = JSON.parse(await cdp.evaluate('JSON.stringify(window.__probe.log)'));
     } finally {
       close();
@@ -332,6 +468,7 @@ if (saved && failures.length === 0) {
 // ---------------------------------------------------------------------------
 if (restored) {
   const record = JSON.parse(saved.storage.session);
+  const entry = activeDocumentEntry(record);
 
   if (!restored.text.includes(TYPED)) {
     failures.push(
@@ -347,7 +484,7 @@ if (restored) {
     failures.push(`הלשונית לא חזרה: ציפינו ל-${TAB}, התקבלה ${JSON.stringify(restored.tab)}`);
   }
 
-  const savedCaret = record.caret?.start ?? null;
+  const savedCaret = entry?.caret?.start ?? null;
   if (!savedCaret) {
     failures.push('מקום הסמן לא נשמר בכלל');
   } else if (!restored.caret) {
@@ -369,6 +506,23 @@ if (restored) {
   notes.push(
     `הפעלה 2: טקסט ${JSON.stringify(restored.text.trim().slice(0, 30))}, זום ${restored.zoom}, ` +
       `לשונית ${restored.tab}, סמן ${JSON.stringify(restored.caret)}`,
+  );
+
+  // 5. כל הטאבים שהיו פתוחים — ולא רק הפעיל.
+  if (restoredTabs.length !== 2) {
+    failures.push(`חזרו ${restoredTabs.length} טאבים במקום שניים`);
+  }
+
+  // 6. והטאב שלא נטען בעלייה — יש בו את מה שנכתב בו, ולא מסמך ריק.
+  if (otherTabText !== null && !otherTabText.includes(TYPED_SECOND)) {
+    failures.push(
+      `הטאב השני חזר בלי התוכן שלו: ציפינו ל-${JSON.stringify(TYPED_SECOND)}, ` +
+        `התקבל ${JSON.stringify(otherTabText.slice(0, 60))}`,
+    );
+  }
+  notes.push(
+    `הפעלה 2: ${restoredTabs.length} טאבים; הטאב השני ` +
+      JSON.stringify((otherTabText ?? '').trim().slice(0, 30)),
   );
 }
 
@@ -394,4 +548,6 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log('\nשער החזרה עבר: הטקסט, הסמן, גודל התצוגה והלשונית חזרו אחרי סגירה ופתיחה.');
+console.log(
+  '\nשער החזרה עבר: הטקסט, הסמן, גודל התצוגה, הלשונית — ושני הטאבים — חזרו.',
+);

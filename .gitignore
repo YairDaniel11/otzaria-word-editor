@@ -1,6 +1,10 @@
-node_modules/
-dist/
-tmp/
+# ללא לוכסן בכוונה. `node_modules/` מחריג תיקיות בלבד, וכך נכנס פעם למעקב
+# קישור סימבולי בשם `node_modules` שהצביע על מחשב אחר — פריט שאינו תיקייה
+# אינו מוחרג על ידי תבנית עם לוכסן. בלי הלוכסן מוחרגים גם תיקייה וגם קישור.
+node_modules
+dist
+tmp
 *.local
 .DS_Store
 Thumbs.db
+.qa-golden/

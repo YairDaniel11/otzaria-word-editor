@@ -90,7 +90,10 @@ const INSTRUMENT = `
     if (!root) return 'no-ribbon';
     var buttons = root.querySelectorAll('button');
     for (var i = 0; i < buttons.length; i++) {
-      var title = buttons[i].getAttribute('title') || '';
+      // data-tip-title ולא title: התכונה המולדת הוסרה מכל התוסף, כדי שמערכת
+      // ההפעלה לא תצייר טולטיפ שני מעל הכרטיס המעוצב. (בלי גרשיים אחוריים —
+      // הקוד הזה יושב בתוך template literal שמוזרק לדף.)
+      var title = buttons[i].getAttribute('data-tip-title') || '';
       for (var j = 0; j < ALIGN.length; j++) {
         if (title.indexOf(ALIGN[j]) !== 0) continue;
         if (buttons[i].classList.contains('active')) return ALIGN[j];

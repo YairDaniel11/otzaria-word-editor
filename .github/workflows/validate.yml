@@ -35,8 +35,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          # מ-.nvmrc, כדי ש-CI והמפתחים ירוצו על אותה גרסה. מ-Node 26 יש
-          # localStorage גלובלי שמאפיל על זה של jsdom ומפיל את חבילת הטסטים.
+          # מ-.nvmrc, כדי ש-CI והמפתחים ירוצו על אותה גרסה. ה-webstorage של
+          # Node 22+ מטופל בסביבת הבדיקות ואינו הסיבה לנעילה כאן.
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: package-lock.json
@@ -62,7 +62,12 @@ jobs:
 
       # `fail-on-warnings: true` משקף את החנות, שחוסמת גם על אזהרות. dist עובר
       # ב-0 אזהרות, ולכן זה שער אמיתי ולא רעש.
+      #
+      # `pr-comment: 'true'` מפרסם את הטבלה ישירות ב-PR מאותו מאגר; ב-PR
+      # מ-fork הטוקן לקריאה בלבד (מגבלת GitHub) והפרסום מדולג באזהרה — את
+      # החסר משלימים שלושת הצעדים הבאים יחד עם validate-comment.yml.
       - name: Validate dist against the live SDK spec
+        id: validate
         uses: Otzaria/otzaria-plugin-validator@v1
         with:
           path: dist
@@ -70,3 +75,40 @@ jobs:
           fail-on-warnings: 'true'
           pr-comment: 'true'
           github-token: ${{ github.token }}
+
+      # לכידת טבלת התוצאות בשביל תגובת ה-PR (validate-comment.yml).
+      #
+      # למה הרצה שנייה של קוד הוולידטור ולא לכידת הסיכום של הצעד שמעליו:
+      # ה-runner דורס `GITHUB_STEP_SUMMARY` שמוגדר ב-`env:` של צעד (נמדד —
+      # ריצה 33570628126: ה-env הוצג בלוג אבל הקובץ לא נוצר), ואין דרך
+      # מתועדת לקרוא את הסיכום של צעד אחר. לכן אותו קוד בדיוק, באותו tag
+      # (v1), רץ שוב עם `GITHUB_STEP_SUMMARY` שנקבע ברמת ה-shell — שם איש
+      # אינו דורס — וכותב את אותה טבלה לקובץ שלנו. ההרצה זולה (נמדד: פחות
+      # משנייה, כולל אחזור ה-spec), ואינה שער: `|| true`, כי הצעד שמעליו
+      # כבר הכשיל את ה-job אם יש מה להכשיל — כאן רק נלכדת הטבלה, שדווקא
+      # בריצה שנכשלה היא החשובה ביותר על ה-PR. מכאן גם `!cancelled()` ולא
+      # `success()`: הלכידה רצה גם אחרי כשל אימות, אבל לא כשה-build עצמו
+      # לא רץ (`outcome == 'skipped'`) — אז אין dist ואין מה למדוד.
+      - name: Checkout the validator for the summary capture
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.validate.outcome != 'skipped' }}
+        uses: actions/checkout@v4
+        with:
+          repository: Otzaria/otzaria-plugin-validator
+          ref: v1
+          path: .validator
+
+      - name: Capture the validator summary for the PR comment
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.validate.outcome != 'skipped' }}
+        run: |
+          env 'INPUT_PATH=dist' 'INPUT_PUBLISH=false' 'INPUT_FAIL-ON-WARNINGS=true' \
+            GITHUB_STEP_SUMMARY="${{ runner.temp }}/validator-summary.md" \
+            node .validator/src/action.js || true
+
+      - name: Hand the summary to the PR-comment workflow
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: validator-summary
+          path: ${{ runner.temp }}/validator-summary.md
+          if-no-files-found: ignore
+          retention-days: 3

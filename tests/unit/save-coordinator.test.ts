@@ -109,16 +109,40 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 20; i += 1) await Promise.resolve();
 }
 
+// כשל שמירה נרשם ל-console.warn (fail() בקואורדינטור); הבדיקות כאן מייצרות
+// אותו בכוונה, ובלי ההשתקה כל ריצה מדפיסה עקבות מחסנית של כשלים מתוכננים.
+beforeEach(() => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+});
+
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe('saveNow', () => {
-  it('מסמך נקי אינו נשמר', async () => {
+  it('מסמך נקי שכבר נשמר לקובץ אינו נשמר שוב', async () => {
     const h = harness();
+    // היעד הוא חצי מההגדרה של „נקי”: מסמך בלי `targetToken` אינו נקי אלא
+    // חסר עותק בדיסק. ראו הבדיקה שמתחת.
+    h.coordinator.reset({ token: 'tok', name: 'חידושים.docx' });
 
     await expect(h.coordinator.saveNow()).resolves.toEqual({ status: 'clean' });
     expect(h.exportCount()).toBe(0);
+  });
+
+  it('„שמור” על מסמך שלא נכתב לדיסק מעולם פותח „שמור בשם”, גם כשאין בו עריכה', async () => {
+    // הלחיצה שנבלעה: מסמך חדש ונקי החזיר `clean` ולא עשה **דבר** — לא דיאלוג
+    // ולא הודעה. מסמך בלי `targetToken` אינו „נקי”, הוא „אין לו עותק בשום
+    // מקום”, ולכן הוא כן עובר סבב — וה-commit יוצא בלי `targetToken`, כלומר
+    // המאחז פותח את הדיאלוג.
+    const h = harness();
+
+    const outcome = await h.coordinator.saveNow({ suggestedName: 'מסמך חדש.docx' });
+
+    expect(outcome).toEqual({ status: 'saved', token: 'token-new', name: 'חידושים.docx', size: 4 });
+    expect(h.exportCount()).toBe(1);
+    expect(h.commits[0]?.targetToken, 'בלי יעד — כלומר „שמור בשם”').toBeUndefined();
   });
 
   it('שמירה ראשונה בלי יעד עוברת דרך „שמור בשם” ומאמצת את ה-token', async () => {
@@ -250,6 +274,21 @@ describe('כשלים', () => {
     // הכשל שמדווח הוא של ההעלאה, לא של הניקוי.
     expect(outcome.status).toBe('failed');
     expect(outcome.status === 'failed' && outcome.message).toContain('413');
+  });
+
+  it('כשל ב-beginWrite מדווח על כשל בהכנת השמירה ולא כשל בהעלאה', async () => {
+    const h = harness();
+    h.coordinator.markDirty();
+    h.onBeginWrite(() => Promise.reject(new Error('error.permission_denied')));
+
+    const outcome = await h.coordinator.saveNow();
+
+    expect(outcome.status).toBe('failed');
+    if (outcome.status === 'failed') {
+      expect(outcome.message).toContain('הכנת השמירה באוצריא נכשלה');
+      expect(outcome.message).toContain('error.permission_denied');
+      expect(outcome.message).not.toContain('העלאת המסמך נכשלה');
+    }
   });
 
   it('כשל commit משאיר מלוכלך ואינו מאמץ יעד', async () => {

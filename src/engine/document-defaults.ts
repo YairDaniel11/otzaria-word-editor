@@ -30,7 +30,7 @@
  * מי שכתב אותו, ואין לגעת בה.
  */
 import type { SuperDoc } from 'superdoc';
-import { applyPaperSize, type PageSetupTarget } from './page-setup';
+import { applyPaperSize, PAPER_SIZES, TWIPS_PER_INCH, type PageSetupTarget } from './page-setup';
 
 /** תוצאת ההחלה. `failures` בעברית — הן מגיעות לשורת המצב. */
 export interface DocumentDefaultsReport {
@@ -94,7 +94,14 @@ export interface DefaultsDocumentApi {
     list?: () => MaybePromise<{ blocks?: Array<{ nodeId?: string; nodeType?: string }> }>;
   };
   sections?: {
-    list?: () => MaybePromise<{ items?: Array<{ address?: unknown }> }>;
+    list?: () => MaybePromise<{
+      items?: Array<{
+        address?: unknown;
+        sectionDirection?: string;
+        /** באינצ'ים, כמו ב-page-setup.ts. */
+        pageSetup?: { width?: number; height?: number };
+      }>;
+    }>;
     setSectionDirection?: (input: {
       target: unknown;
       direction: 'rtl' | 'ltr';
@@ -261,6 +268,37 @@ export interface DocumentPaperSizeReport {
  * לעולם אינה זורקת: `applyPaperSize` בולעת גם קבלה שנכשלה וגם זריקה מהמנוע,
  * ומחזירה אותן כתוצאה.
  */
+/** סטייה מותרת בהשוואת גודל דף שחזר מהמנוע באינצ'ים — עיגול של twips. */
+const PAGE_SIZE_TOLERANCE_TWIPS = 2;
+
+/**
+ * האם המסמך שנפתח כבר נושא את ברירות המחדל העבריות — קריאה אחת, בלי כתיבה.
+ *
+ * למסמך חדש שנפתח מהתבנית (engine/blank-document.ts): כשזה מחזיר `true` אין
+ * צורך בשלוש המוטציות של `applyHebrewDocumentDefaults`, וכשלא — הקורא נופל
+ * אליהן. ברירת המחדל של הגלריה אינה נקראת כאן: היא ב-`styles.xml` של אותה
+ * תבנית, ומקטע RTL בגודל A4 הוא עדות שהתבנית היא שנפתחה.
+ */
+export async function verifyHebrewDocumentDefaults(superdoc: SuperDoc | DefaultsHost): Promise<boolean> {
+  const list = (superdoc as DefaultsHost).activeEditor?.doc?.sections?.list;
+  if (!list) return false;
+  const a4 = PAPER_SIZES.find((size) => size.id === NEW_DOCUMENT_PAPER_SIZE);
+  if (!a4) return false;
+  try {
+    const first = (await list())?.items?.[0];
+    if (!first || first.sectionDirection !== 'rtl') return false;
+    const width = first.pageSetup?.width;
+    const height = first.pageSetup?.height;
+    if (typeof width !== 'number' || typeof height !== 'number') return false;
+    return (
+      Math.abs(width * TWIPS_PER_INCH - a4.widthTwips) <= PAGE_SIZE_TOLERANCE_TWIPS &&
+      Math.abs(height * TWIPS_PER_INCH - a4.heightTwips) <= PAGE_SIZE_TOLERANCE_TWIPS
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function applyHebrewPaperSize(
   superdoc: PageSetupTarget,
 ): Promise<DocumentPaperSizeReport> {

@@ -15,7 +15,8 @@
         <button
           type="button"
           class="fa-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את תפריט הגופן המתקדם"
           @click="$emit('close')"
         >

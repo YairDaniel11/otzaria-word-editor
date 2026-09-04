@@ -16,14 +16,27 @@
  */
 import { describe, expect, it } from 'vitest';
 import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
-import { autoUnmount, buttonByTitle, createCommandDouble, mountUi, settle } from './harness';
+import {
+  autoUnmount,
+  buttonByTip,
+  createCommandDouble,
+  mountUi,
+  pickerValue,
+  setPicker,
+  settle,
+} from './harness';
 
 autoUnmount();
 
-/** מה שהבורר מציג בפועל ב-DOM. */
+/**
+ * מה שהבורר מציג בפועל ב-DOM.
+ *
+ * דרך `pickerValue` ולא דרך `<select>` ישירות: בוררי הגופן והגודל הם
+ * `input[role="combobox"]` ומרווח השורות נשאר `<select>` — וההבחנה הזאת
+ * אינה מה שהבדיקות כאן מודדות.
+ */
 function shown(harness: ReturnType<typeof mountUi>, title: string): string {
-  const select = harness.wrapper.find(`select[title="${title}"]`);
-  return (select.element as HTMLSelectElement).value;
+  return pickerValue(harness.wrapper, title);
 }
 
 const READONLY = {
@@ -38,7 +51,7 @@ describe('מסמך שדוחה את הפקודה', () => {
     await settle();
     expect(shown(harness, 'גופן')).toBe('Assistant');
 
-    await harness.wrapper.find('select[title="גופן"]').setValue('TaameyDavidCLM');
+    await setPicker(harness.wrapper, 'גופן', 'TaameyDavidCLM');
     await settle();
 
     // הכשל דווח למשתמש (זה עבד), אבל התיבה הציגה גופן שלא הוחל על כלום.
@@ -54,7 +67,7 @@ describe('מסמך שדוחה את הפקודה', () => {
     await settle();
     expect(shown(harness, 'גודל גופן')).toBe('20');
 
-    await harness.wrapper.find('select[title="גודל גופן"]').setValue('36');
+    await setPicker(harness.wrapper, 'גודל גופן', '36');
     await settle();
 
     expect(shown(harness, 'גודל גופן')).toBe('20');
@@ -65,7 +78,7 @@ describe('מסמך שדוחה את הפקודה', () => {
     await settle();
     const before = shown(harness, 'מרווח בין שורות');
 
-    await harness.wrapper.find('select[title="מרווח בין שורות"]').setValue('3.0');
+    await setPicker(harness.wrapper, 'מרווח בין שורות', '3.0');
     await settle();
 
     expect(shown(harness, 'מרווח בין שורות')).toBe(before);
@@ -77,7 +90,7 @@ describe('מסמך שדוחה את הפקודה', () => {
     await settle();
 
     for (let click = 0; click < 3; click += 1) {
-      await buttonByTitle(harness.wrapper, 'הגדל גופן').trigger('click');
+      await buttonByTip(harness.wrapper, 'הגדל גופן').trigger('click');
       await settle();
     }
 
@@ -94,12 +107,72 @@ describe('מסמך שדוחה את הפקודה', () => {
     await settle();
 
     for (let click = 0; click < 3; click += 1) {
-      await buttonByTitle(harness.wrapper, 'הקטן גופן').trigger('click');
+      await buttonByTip(harness.wrapper, 'הקטן גופן').trigger('click');
       await settle();
     }
 
     expect(adapter.payloads('font-size')).toEqual([11, 11, 11]);
     expect(shown(harness, 'גודל גופן')).toBe('12');
+  });
+});
+
+/**
+ * Y-PLONI#14 סעיף א: „כאשר אני משנה כתב הסמן לא כותב, ולאחר שתי לחיצות על
+ * העכבר הוא חוזר לכתב הקודם ומאפשר לכתוב.”
+ *
+ * שני חצאי המשפט הם אותו גורם: תיבות הגופן הן `input`, הן לוקחות את המיקוד,
+ * ואיש לא החזיר אותו. ההקלדה הבאה נכנסה לרצועה („לא כותב”), והחזרה למסמך
+ * בלחיצת עכבר קבעה בחירה חדשה שמוחקת עיצוב שהוחל על סמן מכווץ („חוזר לכתב
+ * הקודם”).
+ *
+ * `focus({restoreSelection:true})` הוא מה שמכסה את שניהם, והוא נמדד כאן ולא
+ * מונח: כפיל המסמך מתעד את הקריאה ואת מה שהועבר לה.
+ */
+describe('המיקוד חוזר למסמך', () => {
+  it('אחרי בחירת גודל מהתיבה', async () => {
+    const harness = mountUi(HomeTab);
+    await settle();
+
+    await setPicker(harness.wrapper, 'גודל גופן', '13');
+    await settle();
+
+    expect(harness.superdoc.ops()).toContain('focus');
+    expect(harness.superdoc.inputs('focus')).toEqual([{ restoreSelection: true }]);
+  });
+
+  it('אחרי בחירת גופן מהתיבה', async () => {
+    const harness = mountUi(HomeTab);
+    await settle();
+
+    await setPicker(harness.wrapper, 'גופן', 'TaameyDavidCLM');
+    await settle();
+
+    expect(harness.superdoc.inputs('focus')).toEqual([{ restoreSelection: true }]);
+  });
+
+  it('וגם אחרי Escape בתיבה, בלי שהוחל דבר', async () => {
+    const harness = mountUi(HomeTab);
+    await settle();
+
+    const box = harness.wrapper.find('input[role="combobox"][data-tip-title="גודל גופן"]');
+    await box.trigger('focus');
+    await box.trigger('keydown', { key: 'Escape' });
+    await settle();
+
+    expect(harness.superdoc.ops()).toContain('focus');
+    expect(harness.adapter.payloads('font-size')).toEqual([]);
+  });
+
+  it('יציאה מהתיבה אינה מחזירה מיקוד — המשתמש כבר בחר לאן ללכת', async () => {
+    const harness = mountUi(HomeTab);
+    await settle();
+
+    const box = harness.wrapper.find('input[role="combobox"][data-tip-title="גודל גופן"]');
+    await box.trigger('focus');
+    await box.trigger('blur');
+    await settle();
+
+    expect(harness.superdoc.ops()).not.toContain('focus');
   });
 });
 
@@ -110,7 +183,7 @@ describe('מסמך שמקבל את הפקודה', () => {
     const harness = mountUi(HomeTab);
     await settle();
 
-    await harness.wrapper.find('select[title="גופן"]').setValue('Rubik');
+    await setPicker(harness.wrapper, 'גופן', 'Rubik');
     await settle();
 
     expect(harness.adapter.payloads('font-family')).toEqual(['Rubik']);
@@ -124,7 +197,7 @@ describe('מסמך שמקבל את הפקודה', () => {
     await settle();
 
     for (let click = 0; click < 3; click += 1) {
-      await buttonByTitle(harness.wrapper, 'הגדל גופן').trigger('click');
+      await buttonByTip(harness.wrapper, 'הגדל גופן').trigger('click');
       await settle();
     }
 
@@ -138,7 +211,7 @@ describe('מה שהמנוע מדווח', () => {
     const harness = mountUi(HomeTab, { adapter });
     await settle();
 
-    await harness.wrapper.find('select[title="גופן"]').setValue('Rubik');
+    await setPicker(harness.wrapper, 'גופן', 'Rubik');
     await settle();
 
     // הסמן זז לטקסט אחר, והמנוע דיווח גופן אחר.
@@ -186,12 +259,11 @@ describe('בחירה שנייה בזמן שהראשונה באוויר', () => {
     const harness = mountUi(HomeTab, { adapter });
     await settle();
 
-    const select = harness.wrapper.find('select[title="גופן"]');
-    await select.setValue('Rubik');
+    await setPicker(harness.wrapper, 'גופן', 'Rubik');
     await settle();
     expect(shown(harness, 'גופן')).toBe('Rubik');
 
-    await select.setValue('Shofar');
+    await setPicker(harness.wrapper, 'גופן', 'Shofar');
     await settle();
     expect(shown(harness, 'גופן')).toBe('Shofar');
 

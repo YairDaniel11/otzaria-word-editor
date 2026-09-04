@@ -8,7 +8,7 @@
  * ב-engine/captions.ts.
  */
 import { describe, expect, it } from 'vitest';
-import { autoUnmount, createSuperdocDouble, mountUi, settle } from './harness';
+import { autoUnmount, createSuperdocDouble, mountUi, settle, tipMessage } from './harness';
 
 import ReferencesTab from '../../src/ui/ribbon/tabs/ReferencesTab.vue';
 import CaptionDialog from '../../src/ui/panels/CaptionDialog.vue';
@@ -201,7 +201,7 @@ describe('הרצועה', () => {
 
     const control = button(harness, 'הוסף כיתוב');
     expect(control.attributes('disabled')).toBeDefined();
-    expect(control.attributes('title')).toContain('אינה זמינה');
+    expect(tipMessage(control)).toContain('אינה זמינה');
   });
 
   it('הקבוצות שקדמו לגל הזה נשארו על מקומן', async () => {
@@ -212,7 +212,6 @@ describe('הרצועה', () => {
     expect(titles).toEqual([
       'תוכן עניינים',
       'הערות שוליים',
-      'הפניות מקושרות',
       'מפתח',
       'ציטוטים וביבליוגרפיה',
       'כיתובים',

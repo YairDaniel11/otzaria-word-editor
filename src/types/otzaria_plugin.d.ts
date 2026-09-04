@@ -525,6 +525,42 @@ export interface HighlightCapabilities {
   contextMenu: string[];
 }
 
+/**
+ * שולחן עבודה — אוסף הכרטיסיות הפתוחות (`workspace.list`).
+ */
+export interface WorkspaceListEntry {
+  id: string;
+  name: string;
+  isActive: boolean;
+  /**
+   * מספר הכרטיסיות שה-API חושף — אותן כרטיסיות שב-`ReaderState.openTabs`.
+   * כרטיסיות של כלים ותוספים אינן נמנות. בשולחן הפעיל זו הספירה החיה.
+   */
+  tabCount: number;
+}
+
+/** השולחן הפעיל (`workspace.getActive`). `null` כשעדיין לא נטען שולחן. */
+export interface ActiveWorkspace {
+  id: string | null;
+  name: string | null;
+}
+
+/** ארגומנטים ל-`workspace.create`. */
+export interface WorkspaceCreateArgs {
+  /** עד 100 תווים; שם ריק נדחה ב-`error.invalid_params`. */
+  name: string;
+  /** מעבר לשולחן מיד לאחר היצירה. ברירת מחדל `false`. */
+  switchTo?: boolean;
+  /** החזרת שולחן קיים באותו שם במקום יצירת כפילות. ברירת מחדל `false`. */
+  reuseExisting?: boolean;
+}
+
+/** תוצאת `workspace.create`. `created: false` = הוחזר שולחן קיים. */
+export interface WorkspaceCreateResult {
+  id: string;
+  created: boolean;
+}
+
 /** סימנייה (`bookmarks.list`). */
 export interface BookmarkEntry extends BookIdentity {
   title: string;
@@ -535,6 +571,16 @@ export interface BookmarkEntry extends BookIdentity {
   targetKind: 'book' | 'commentators';
   /** ISO 8601; null בסימניות מגרסאות קודמות. */
   createdAt: string | null;
+}
+
+/**
+ * ארגומנטים ל-`reader.closeTab` ול-`reader.activateTab`.
+ *
+ * ה-index הוא המקום ב-`ReaderState.openTabs` — לא מקומה של הכרטיסייה בשורת
+ * הכרטיסיות. אינדקס מחוץ לתחום מוחזר כ-`error.invalid_params`.
+ */
+export interface ReaderTabIndexArgs {
+  index: number;
 }
 
 /** ארגומנטים ל-`bookmarks.add`. הספר מזוהה ב-`id` או ב-`bookId`. */
@@ -1202,6 +1248,11 @@ export interface OtzariaEventMap {
     currentBookId: string;
     currentIndex: number;
   };
+  /**
+   * A keyboard shortcut bound to a free-form command was pressed in the reading
+   * screen. Sent only to the registering plugin.
+   */
+  'app.command': PluginCommandPayload;
   /** User clicked a plugin-registered context menu item. Sent only to the registering plugin. */
   'reader.context_menu_item_clicked': {
     itemId: string;
@@ -1499,6 +1550,38 @@ export type WorkspaceStatResult =
   | { exists: false };
 
 /**
+ * A keyboard shortcut the plugin declares (manifest `contributes.startup.shortcuts`
+ * or runtime `app.registerShortcut`). Pressing it in the reading screen either
+ * sends an `app.command` event to the plugin (`command`) or triggers a
+ * right-click menu action exactly like a right-click on it (`contextMenuItemId`).
+ */
+export interface PluginShortcutArgs {
+  /** Unique id within the plugin. */
+  id: string;
+  /** Display label shown in the keyboard-shortcut settings screen. */
+  label: string;
+  /** Default key in canonical form (`ctrl+alt+x`); empty = user assigns one. */
+  key?: string;
+  /** Free-form command name, delivered to the plugin via the `app.command` event. */
+  command?: string;
+  /** Id of a context-menu item (`reader.addContextMenuItem`) this shortcut triggers. */
+  contextMenuItemId?: string;
+}
+
+/** Arguments for `app.updateShortcut`. Only `key` is currently supported. */
+export interface PluginShortcutUpdateArgs {
+  id: string;
+  patch: { key?: string };
+}
+
+/** Payload of the `app.command` event delivered when a command shortcut is pressed. */
+export interface PluginCommandPayload {
+  /** The `command` value passed to `app.registerShortcut` / manifest. */
+  command: string;
+  /** The shortcut id that triggered the command. */
+  shortcutId: string;
+}
+/**
  * One entry of `fonts.resolveFamilies`: a family the document asks for, and the
  * fonts that may stand in for it, best first.
  */
@@ -1526,6 +1609,43 @@ export interface ResolveFontFamiliesResult {
   resolved: string[];
 }
 
+/**
+ * One installed font family, from `fonts.listInstalled`.
+ */
+export interface InstalledFontFamily {
+  /**
+   * Exactly what CSS `font-family` accepts — not a file name, not "David Bold".
+   *
+   * On Windows GDI truncates a family name at 31 characters, so
+   * `Bahnschrift SemiBold SemiCondensed` arrives as
+   * `Bahnschrift SemiBold SemiConden`.
+   */
+  name: string;
+  /** Which writing systems the family covers. */
+  scripts: Array<
+    'latin' | 'hebrew' | 'arabic' | 'cyrillic' | 'greek' | 'cjk' | 'thai' | 'symbol'
+  >;
+  /** `true` for a fixed-pitch family such as Consolas. */
+  monospace: boolean;
+}
+
+/**
+ * Result of `fonts.listInstalled`: the font families present on this machine.
+ *
+ * Lets a plugin see what actually exists before it picks a substitute, instead
+ * of guessing or probing `fonts.resolveFamilies` family by family. A platform
+ * with no implementation returns an empty `families` — that is not an error.
+ *
+ * Legacy Windows raster fonts (`.fon`) are excluded: a WebView cannot render
+ * them, so their names would not be usable in CSS.
+ */
+export interface ListInstalledFontsResult {
+  /** The installed families, sorted by name, each name appearing once. */
+  families: InstalledFontFamily[];
+  /** The host platform, e.g. `'windows'`. */
+  platform: string;
+}
+
 export type OtzariaMethod =
   | 'app.getInfo'
   | 'app.getTheme'
@@ -1535,6 +1655,10 @@ export type OtzariaMethod =
   | 'app.getConnectivity'
   | 'app.openUrl'
   | 'fonts.resolveFamilies'
+  | 'fonts.listInstalled'
+  | 'app.registerShortcut'
+  | 'app.unregisterShortcut'
+  | 'app.updateShortcut'
   | 'library.findBooks'
   | 'library.getBookMetadata'
   | 'library.resolveBooks'
@@ -1550,6 +1674,7 @@ export type OtzariaMethod =
   | 'library.getRawLinks'
   | 'library.getLinkTargetsSummary'
   | 'library.getLinkContent'
+  | 'library.refreshUserBooks'
   | 'library.getTree'
   | 'library.resolveCategoryPaths'
   | 'search.fullText'
@@ -1564,6 +1689,8 @@ export type OtzariaMethod =
   | 'reader.respondExternalSearch'
   | 'reader.getCurrentState'
   | 'reader.getCurrentRef'
+  | 'reader.closeTab'
+  | 'reader.activateTab'
   | 'reader.getSelection'
   | 'reader.getActiveCommentators'
   | 'reader.setActiveCommentators'
@@ -1571,6 +1698,10 @@ export type OtzariaMethod =
   | 'reader.getHighlightCapabilities'
   | 'reader.findTextOccurrences'
   | 'reader.getSectionTextMap'
+  | 'workspace.list'
+  | 'workspace.getActive'
+  | 'workspace.create'
+  | 'workspace.switch'
   | 'navigation.goTo'
   | 'notes.list'
   | 'notes.getBookNotesSummary'
@@ -1720,6 +1851,16 @@ export interface OtzariaGlobal {
     callback: (detail: OtzariaEventMap[K]) => void
   ): void;
   off(event: string, callback: (detail: unknown) => void): void;
+
+  /**
+   * Turns bare `otzaria://` URLs inside `root` (default: `document.body`) into
+   * clickable anchors. Returns the number of text nodes replaced.
+   *
+   * Skips `<a>`, `<code>`, `<pre>`, `<textarea>`, `<input>`, `<script>`,
+   * contenteditable subtrees and anything under `[data-otzaria-no-linkify]`.
+   * Set `contributes.autoLinkify` in the manifest to run it automatically.
+   */
+  linkify(root?: Element | Document): number;
 }
 
 // ---------------------------------------------------------------------------

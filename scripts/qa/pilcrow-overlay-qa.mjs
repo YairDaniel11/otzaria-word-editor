@@ -13,8 +13,8 @@
  */
 import { openApp, createReport } from './harness.mjs';
 
-const PORT = 9380;
-const report = createReport('סימני עיצוב — ציור ¶ בפועל בעורך');
+const PORT = Number(process.env.QA_PORT ?? 9380);
+const report = createReport('סימני עיצוב — ציור ¶ בפועל בעורך', { strict: true });
 
 const app = await openApp({ name: 'pilcrow-overlay', port: PORT });
 

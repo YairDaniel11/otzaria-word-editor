@@ -19,7 +19,8 @@
         <button
           type="button"
           class="pn-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את עיצוב מספרי העמודים"
           @click="$emit('close')"
         >
@@ -94,16 +95,6 @@
           את המסמך ל„המשך מהמקטע הקודם” מתוך התוסף.
         </p>
 
-        <!--
-          המספור העברי חסר כאן מפני שהמנוע דוחה אותו בזמן ריצה, ולא מפני
-          שהושמט. אמירה מפורשת עדיפה על משתמש שמחפש „א, ב, ג” ברשימה.
-        -->
-        <p
-          class="pn-note"
-          role="note"
-        >
-          מספור עברי („א, ב, ג”) אינו נתמך במנוע.
-        </p>
       </div>
 
       <div class="pn-footer">

@@ -8,7 +8,7 @@
  * שסוגרת את חלון ה-TOCTOU קיימת בפועל ולא רק בהערה.
  */
 import { describe, expect, it } from 'vitest';
-import { autoUnmount, createSuperdocDouble, mountUi, settle } from './harness';
+import { autoUnmount, createSuperdocDouble, mountUi, settle, tipMessage, tipSelector } from './harness';
 
 import LayoutTab from '../../src/ui/ribbon/tabs/LayoutTab.vue';
 import PageNumberingDialog from '../../src/ui/panels/PageNumberingDialog.vue';
@@ -21,7 +21,7 @@ async function chooseFromMenu(
   buttonTitle: string,
   itemLabel: string,
 ): Promise<void> {
-  await harness.wrapper.find(`button[title="${buttonTitle}"]`).trigger('click');
+  await harness.wrapper.find(tipSelector(buttonTitle)).trigger('click');
   const item = harness.wrapper
     .findAll('[role="menuitem"]')
     .find((candidate) => candidate.text().includes(itemLabel));
@@ -102,7 +102,7 @@ describe('מספרי שורות', () => {
       .findAll('button')
       .find((item) => item.text().includes('מספרי שורות'));
     expect(button?.attributes('disabled')).toBeDefined();
-    expect(button?.attributes('title')).toBe('הפעולה אינה זמינה בגרסה הזאת של המנוע');
+    expect(tipMessage(button!)).toBe('הפעולה אינה זמינה בגרסה הזאת של המנוע');
   });
 });
 
@@ -192,7 +192,7 @@ describe('מספור עמודים', () => {
     const harness = mountUi(LayoutTab, { superdoc });
     await settle();
 
-    await harness.wrapper.find(`button[title="${PAGE_NUMBERING}"]`).trigger('click');
+    await harness.wrapper.find(tipSelector(PAGE_NUMBERING)).trigger('click');
     await settle();
 
     const dialog = harness.wrapper.findComponent(PageNumberingDialog);
@@ -211,7 +211,7 @@ describe('מספור עמודים', () => {
     const harness = mountUi(LayoutTab, { superdoc });
     await settle();
 
-    await harness.wrapper.find(`button[title="${PAGE_NUMBERING}"]`).trigger('click');
+    await harness.wrapper.find(tipSelector(PAGE_NUMBERING)).trigger('click');
     await settle();
 
     expect(harness.wrapper.findComponent(PageNumberingDialog).props('format')).toBe(null);
@@ -225,7 +225,7 @@ describe('מספור עמודים', () => {
       const harness = mountUi(LayoutTab, { superdoc });
       await settle();
 
-      await harness.wrapper.find(`button[title="${PAGE_NUMBERING}"]`).trigger('click');
+      await harness.wrapper.find(tipSelector(PAGE_NUMBERING)).trigger('click');
       await settle();
 
       expect(harness.wrapper.findComponent(PageNumberingDialog).props('format')).toBe(format);
@@ -237,7 +237,7 @@ describe('מספור עמודים', () => {
     const harness = mountUi(LayoutTab, { superdoc });
     await settle();
 
-    await harness.wrapper.find(`button[title="${PAGE_NUMBERING}"]`).trigger('click');
+    await harness.wrapper.find(tipSelector(PAGE_NUMBERING)).trigger('click');
     await settle();
 
     const dialog = harness.wrapper.findComponent(PageNumberingDialog);
@@ -256,7 +256,7 @@ describe('מספור עמודים', () => {
     const harness = mountUi(LayoutTab, { superdoc });
     await settle();
 
-    await harness.wrapper.find(`button[title="${PAGE_NUMBERING}"]`).trigger('click');
+    await harness.wrapper.find(tipSelector(PAGE_NUMBERING)).trigger('click');
     await settle();
     harness.wrapper
       .findComponent(PageNumberingDialog)
@@ -276,7 +276,7 @@ describe('מרחק הכותרת מקצה הדף', () => {
     const harness = mountUi(LayoutTab, { superdoc });
     await settle();
 
-    await harness.wrapper.find(`button[title="${HEADER_DISTANCE}"]`).trigger('click');
+    await harness.wrapper.find(tipSelector(HEADER_DISTANCE)).trigger('click');
     await settle();
 
     const dialog = harness.wrapper.findComponent(HeaderDistanceDialog);
@@ -289,7 +289,7 @@ describe('מרחק הכותרת מקצה הדף', () => {
     const harness = mountUi(LayoutTab, { superdoc });
     await settle();
 
-    await harness.wrapper.find(`button[title="${HEADER_DISTANCE}"]`).trigger('click');
+    await harness.wrapper.find(tipSelector(HEADER_DISTANCE)).trigger('click');
     await settle();
     harness.wrapper
       .findComponent(HeaderDistanceDialog)
@@ -311,7 +311,7 @@ describe('מרחק הכותרת מקצה הדף', () => {
     const harness = mountUi(LayoutTab, { superdoc });
     await settle();
 
-    await harness.wrapper.find(`button[title="${HEADER_DISTANCE}"]`).trigger('click');
+    await harness.wrapper.find(tipSelector(HEADER_DISTANCE)).trigger('click');
     await settle();
 
     for (const [id, value] of [['#hd-header', '2.54'], ['#hd-footer', '1.27']] as const) {
@@ -358,7 +358,7 @@ describe('מרחק הכותרת מקצה הדף', () => {
     const harness = mountUi(LayoutTab, { superdoc });
     await settle();
 
-    await harness.wrapper.find(`button[title="${HEADER_DISTANCE}"]`).trigger('click');
+    await harness.wrapper.find(tipSelector(HEADER_DISTANCE)).trigger('click');
     await settle();
     harness.wrapper
       .findComponent(HeaderDistanceDialog)
@@ -393,7 +393,7 @@ describe('הנעילה מגיעה גם אל כפתורי הדיאלוגים', ()
     const harness = mountUi(LayoutTab, { superdoc });
     await settle();
 
-    await harness.wrapper.find(`button[title="${title}"]`).trigger('click');
+    await harness.wrapper.find(tipSelector(title)).trigger('click');
     await settle();
 
     await chooseFromMenu(harness, LINE_NUMBERS, 'רציף');
@@ -458,7 +458,7 @@ describe('הנעילה בזמן שפעולה באוויר', () => {
 
     // וגם הפקד עצמו — כלומר לחיצה שנייה אינה יכולה להיקלט בכלל: הכפתור
     // מנוטרל, ולכן התפריט אינו נפתח ואין מה לבחור בו.
-    const lineNumbers = harness.wrapper.find(`button[title="${LINE_NUMBERS}"]`);
+    const lineNumbers = harness.wrapper.find(tipSelector(LINE_NUMBERS));
     expect(lineNumbers.attributes('disabled')).toBeDefined();
     await lineNumbers.trigger('click');
     await settle();

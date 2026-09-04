@@ -26,6 +26,31 @@ function cssVar(text: string, name: string): string | undefined {
   return match?.[1].trim();
 }
 
+/**
+ * מרים את מסך הטעינה האמיתי ב-jsdom: הסימון והסקריפט נלקחים מ-`index.html`
+ * עצמו, ולא משוכפלים לכאן — בדיקה שמריצה עותק אינה בודקת את מה שנשלח.
+ */
+function runSplash(): {
+  root: HTMLElement;
+  note: HTMLElement;
+  api: { set(next: number, text?: string): void; fail(text?: string, detail?: string): void; done(): void };
+} {
+  const markup = html.slice(html.indexOf('<div id="otzaria-splash"'), html.indexOf('<div id="app">'));
+  const open = html.indexOf('<script>', html.indexOf('<div id="app">'));
+  const script = html.slice(html.indexOf('>', open) + 1, html.indexOf('</script>', open));
+
+  document.body.innerHTML = markup;
+  new Function(script)();
+
+  const api = (window as unknown as { __otzariaSplash: ReturnType<typeof runSplash>['api'] })
+    .__otzariaSplash;
+  return {
+    root: document.getElementById('otzaria-splash') as HTMLElement,
+    note: document.getElementById('otzaria-splash-note') as HTMLElement,
+    api,
+  };
+}
+
 describe('מסך הטעינה', () => {
   it('מצויר לפני כל סקריפט של התוסף', () => {
     const head = html.slice(0, html.indexOf('</head>'));
@@ -49,6 +74,8 @@ describe('מסך הטעינה', () => {
       ['--splash-muted', '--color-on-surface-variant'],
       ['--splash-track', '--color-outline-variant'],
       ['--splash-accent', '--color-primary'],
+      // צבע הכשל, ומופיע רק בכלל של data-failed.
+      ['--splash-error', '--color-error'],
     ];
 
     for (const [splashName, tokenName] of pairs) {
@@ -56,9 +83,35 @@ describe('מסך הטעינה', () => {
       expect(expected, `${tokenName} חסר ב-tokens.css`).toBeDefined();
       expect(cssVar(html, splashName), `${splashName} מול ${tokenName}`).toBe(expected);
     }
+  });
 
-    // צבע הכשל הוא --color-error, ומופיע רק בכלל של data-failed.
-    expect(html).toContain(cssVar(tokens, '--color-error'));
+  it('עומד בכללי העיצוב של הוולידטור', () => {
+    // הוולידטור של אוצריא סורק את בלוק ה-<style> של index.html — ה-CSS היחיד
+    // בתוסף שאינו מוטמע ב-app.js — ומעיר על ערכים קשיחים: hex מחוץ להגדרת
+    // משתנה, font-family בלי var(--font-*), font-size ו-border-radius ב-px,
+    // ואפס שימוש ב-var(--color-*). חמש ההערות האלה ישבו על main בכל ריצה.
+    // הכללים כאן הם שלו (extendedValidator.js, checkDesignCompliance), כדי
+    // שהתיקון לא יישחק בשקט.
+    const style = html.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
+    expect(style).not.toBe('');
+    const stripped = style
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/--[a-zA-Z_][\w-]*\s*:\s*[^;}]+;?/g, '');
+
+    expect(stripped).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(stripped).not.toMatch(/\b(?:rgb|rgba|hsl|hsla)\s*\(/);
+    for (const [, value] of stripped.matchAll(/font-family\s*:\s*([^;}]+)/g)) {
+      expect(value).toMatch(/var\(\s*--font/);
+    }
+    for (const [, value] of stripped.matchAll(/font-size\s*:\s*([^;}]+)/g)) {
+      expect(value.trim()).toMatch(/^(?:var\(|\d+(?:\.\d+)?(?:em|rem|%)$)/);
+    }
+    for (const [, value] of stripped.matchAll(/border-radius\s*:\s*([^;}]+)/g)) {
+      // כמו אצל הוולידטור: ערך שמתחיל ב-var() עובר, גם אם ה-fallback שלו ב-px.
+      if (/var\s*\(/.test(value)) continue;
+      expect(value.trim()).not.toMatch(/\d\s*px/);
+    }
+    expect(style).toMatch(/var\(\s*--color-/);
   });
 
   it('מאמץ את ערכת הנושא גם כשהיא מגיעה מאוחר', () => {
@@ -111,6 +164,47 @@ describe('מסך הטעינה', () => {
     expect(Math.max(...loaderStages)).toBeLessThan(Math.min(...moduleStages));
     // ובתוך הטוען עצמו: הסדר הוא סדר ההרצה של שני הקבצים.
     expect(loaderStages).toEqual([...loaderStages].sort((a, b) => a - b));
+  });
+
+  it('חריגה שאיש אינו תופס הופכת לכשל על המסך', () => {
+    // הבאג שהיה כאן: הטוען שב-vite.config.ts מכסה תגית שלא **נטענה**, ולא
+    // קוד שנטען ונכשל בהרצה. ייבוא של סמל שאינו קיים ב-superdoc-macros
+    // — נמדד — השאיר את המסך על „מתחיל" לנצח, בלי שום מילה למשתמש.
+    const { root, note, api } = runSplash();
+    expect(api).toBeTruthy();
+
+    window.dispatchEvent(new ErrorEvent('error', { message: 'SyntaxError: boom' }));
+
+    expect(root.getAttribute('data-failed')).toBe('1');
+    expect(note.textContent).toContain('SyntaxError: boom');
+  });
+
+  it('„Script error.” המושתק אינו מוצג כפירוט', () => {
+    // ב-file:// — התוסף הארוז — Chrome משתיק את החריגה ומוסר את המחרוזת
+    // הזאת בלבד, בלי error/filename/lineno. נמדד. הצגתה היא מחרוזת אנגלית
+    // גלויה למשתמש שגם אינה אומרת דבר.
+    const { root, note, api } = runSplash();
+    expect(api).toBeTruthy();
+
+    window.dispatchEvent(new ErrorEvent('error', { message: 'Script error.' }));
+
+    expect(root.getAttribute('data-failed')).toBe('1');
+    expect(note.textContent).not.toContain('Script error.');
+    expect(note.textContent).toContain('קונסולת הדף');
+  });
+
+  it('התקדמות אחרי חריגה מבטלת את הכשל', () => {
+    // חריגה בעלייה אינה בהכרח קטלנית. מסך שנצבע אדום ונשאר אדום בזמן
+    // שהתוסף כן עלה גרוע מהשתיקה שהוא בא להחליף.
+    const { root, api } = runSplash();
+    window.dispatchEvent(new ErrorEvent('error', { message: 'רעש' }));
+    expect(root.getAttribute('data-failed')).toBe('1');
+
+    api.set(68, 'מכין את סביבת העריכה…');
+    expect(root.getAttribute('data-failed')).toBeNull();
+
+    api.done();
+    expect(root.getAttribute('data-done')).toBe('1');
   });
 
   it('התחנות עולות מונוטונית ואינן מגיעות ל-100', () => {

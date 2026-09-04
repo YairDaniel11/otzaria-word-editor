@@ -12,8 +12,18 @@ npm run build          # חובה — השערים רצים על dist, לא על
 node scripts/qa/<שם>-qa.mjs
 ```
 
+את כל הרשימה מריץ `npm run verify:qa`, ודרך `run-all.mjs` ולא שרשרת `&&`:
+שרשרת עוצרת בכשל הראשון, וכל מה שאחריו אינו רץ בכלל — בפלט שנראה כמו ריצה
+מלאה. הרַץ מריץ עד הסוף, מסכם, ומחזיר קוד יציאה 1 אם מישהו נכשל.
+
 כל שער חייב **יציאה משלו** (`port`). שני שערים על אותה יציאה מדברים עם אותו
 דפדפן ומשחיתים זה את מדידתו.
+
+שני משתני סביבה, ולא אחד: השערים כאן קוראים את יציאת ה-CDP מ-`QA_PORT`
+(`harness.mjs`, וברירת מחדל אחרת לכל שער), והכלים שמעל — `scripts/cdp.mjs`
+ומה שמשתמש בו — מ-`CDP_PORT` (ברירת מחדל 9333). מי שמריץ שער ובודק
+שמעל `scripts/` במקביל, ומגדיר רק אחד מהשניים, מקבל „CDP לא נפתח” על שער
+שתפוס — כשל תשתית שנראה בדיוק כמו תקלת מוצר. הגדירו את שניהם, בערכים שונים.
 
 ## השלד של שער
 
@@ -52,7 +62,14 @@ process.exit(report.print() > 0 ? 1 : 0);
 **דיאלוגים** — `dialog()` (שם + כל הפקדים), `dialogFill(idאוName, value)`, `clickDialog(name)`
 
 **מסמך וקלט**
-- `caret(lineIndex)` — לחיצה בשורת טקסט; `selectLine(i)`, `extendSelection(n)`
+- `caret(lineIndex)` — לחיצה בשורת טקסט; `selectLine(i)`, `extendSelection(n)`.
+  **`lineIndex` אינו אינדקס פסקה**: הסלקטור שמאחוריו הוא
+  `'.superdoc-line, .superdoc-fragment'`, וה-line מקונן ב-fragment — כלומר כל
+  פסקה תופסת שני אינדקסים, ו-`caret(1)` הוא עוד הפסקה הראשונה. `caret(0)`
+  תמיד הפסקה הראשונה, ולכן רוב הקוראים אינם נפגעים
+- `caretPara(indexאוText)` — סמן בפסקה, **מאומת מול המנוע** (`data-source-node-id`
+  של ה-fragment מול `doc.selection.current()`) וזורק כשהלחיצה נחתה על אחרת.
+  ‏`paraCount()`, `caretBlock()`. זה מה שצריך כשהמדידה תלויה **באיזו** פסקה
 - `type(text)`, `press(key, code, vk, modifiers, text)`
 - `screenText()`, `lineCount()`, `selection()`
 - `docx()` → מפה של `נתיב → מחרוזת` מתוך ה-docx המיוצא. **זו ההוכחה.** `word/document.xml`,

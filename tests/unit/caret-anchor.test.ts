@@ -9,6 +9,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   applyCaretAnchor,
+  applyDocumentStartCaret,
+  hasTextCaret,
   readCaretAnchor,
   type CaretAnchor,
   type CaretDocSource,
@@ -277,5 +279,83 @@ describe('applyCaretAnchor', () => {
 
     await expect(applyCaretAnchor(ui, {}, anchor)).resolves.toBe(true);
     warn.mockRestore();
+  });
+});
+
+describe('hasTextCaret', () => {
+  it('סמן בטקסט — יש', () => {
+    expect(hasTextCaret(uiWithSelection({ selectionTarget: caretAt('b1', 3) }))).toBe(true);
+  });
+
+  it('נופל ל-target, כמו readCaretAnchor', () => {
+    const ui = uiWithSelection({
+      selectionTarget: null,
+      target: { kind: 'text', segments: [{ blockId: 'b2', range: { start: 0, end: 0 } }] },
+    });
+    expect(hasTextCaret(ui)).toBe(true);
+  });
+
+  it('אין בחירה, בחירה שאינה בטקסט, או אין handle — אין', () => {
+    expect(hasTextCaret(uiWithSelection(null))).toBe(false);
+    expect(
+      hasTextCaret(
+        uiWithSelection({
+          selectionTarget: {
+            kind: 'selection',
+            start: { kind: 'nodeEdge', node: { kind: 'block', nodeId: 't1' }, edge: 'before' },
+            end: { kind: 'nodeEdge', node: { kind: 'block', nodeId: 't1' }, edge: 'after' },
+          },
+        }),
+      ),
+    ).toBe(false);
+    expect(hasTextCaret({})).toBe(false);
+    expect(hasTextCaret(null)).toBe(false);
+  });
+
+  it('קריאה שזרקה אינה מפילה', () => {
+    const ui: CaretUiSource = {
+      selection: {
+        getSnapshot: () => {
+          throw new Error('המנוע התפרק');
+        },
+      },
+    };
+    expect(hasTextCaret(ui)).toBe(false);
+  });
+});
+
+describe('applyDocumentStartCaret', () => {
+  it('סמן מכווץ בפסקה הראשונה, היסט 0', async () => {
+    const { ui, applied } = uiThatAccepts(['b1']);
+    const { doc } = docWithBlocks(['b1', 'b2']);
+
+    await expect(applyDocumentStartCaret(ui, doc)).resolves.toBe(true);
+    expect(applied).toEqual([{ start: 'b1', offset: 0 }]);
+  });
+
+  it('בלי גלילה — המסמך ממילא נפתח בתחילתו', async () => {
+    const { ui, scrolled } = uiThatAccepts(['b1']);
+    await applyDocumentStartCaret(ui, docWithBlocks(['b1']).doc);
+    expect(scrolled).toEqual([]);
+  });
+
+  it('מסמך בלי פסקאות, או פסקה ראשונה בלי מזהה — אין סמן ואין זריקה', async () => {
+    const { ui } = uiThatAccepts(['b1']);
+    await expect(applyDocumentStartCaret(ui, docWithBlocks([]).doc)).resolves.toBe(false);
+
+    const noId: CaretDocSource = {
+      activeEditor: {
+        doc: { blocks: { list: () => ({ total: 1, blocks: [{ ordinal: 0 }] }) } },
+      },
+    };
+    await expect(applyDocumentStartCaret(ui, noId)).resolves.toBe(false);
+  });
+
+  it('המנוע דחה, או שאין handles — false, לא חריגה', async () => {
+    await expect(
+      applyDocumentStartCaret(uiThatAccepts([]).ui, docWithBlocks(['b1']).doc),
+    ).resolves.toBe(false);
+    await expect(applyDocumentStartCaret({}, docWithBlocks(['b1']).doc)).resolves.toBe(false);
+    await expect(applyDocumentStartCaret(uiThatAccepts(['b1']).ui, {})).resolves.toBe(false);
   });
 });

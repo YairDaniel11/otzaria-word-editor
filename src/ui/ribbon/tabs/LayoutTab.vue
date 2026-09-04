@@ -34,26 +34,42 @@
         :items="columnItems"
         @select="onColumns"
       />
-      <RibbonMenuButton
-        icon="numberList"
-        label="מספרי שורות"
-        :tooltip="tip('canSetLineNumbering', 'מספור השורות בשולי הדף')"
-        :disabled="!can('canSetLineNumbering')"
-        :items="lineNumberItems"
-        @select="onLineNumbering"
-      />
-      <RibbonMenuButton
-        icon="borders"
-        label="גבולות עמוד"
-        :tooltip="tip('canSetPageBorders', 'מסגרת סביב העמוד')"
-        :disabled="!can('canSetPageBorders')"
-        :items="pageBorderItems"
-        @select="onPageBorders"
-      />
+      <!--
+        שני אלה במחסנית ולא בשורה: ב-Word הקבוצה „הגדרת עמוד” היא ארבעה
+        פקדים גדולים (שוליים, כיוון, גודל, עמודות) ועמודה של קטנים לצידם.
+        שניהם גם „כותב נכון, לא מוצג” — המנוע אינו מצייר `lnNumType` ולא
+        `pgBorders` (docs/button-audit.md), ולכן הם בוודאי אינם הראשיים כאן.
+      -->
+      <RibbonStack>
+        <RibbonMenuButton
+          icon="numberList"
+          label="מספרי שורות"
+          variant="small"
+          :tooltip="tip('canSetLineNumbering', 'מספור השורות בשולי הדף')"
+          :disabled="!can('canSetLineNumbering')"
+          :items="lineNumberItems"
+          @select="onLineNumbering"
+        />
+        <RibbonMenuButton
+          icon="borders"
+          label="גבולות עמוד"
+          variant="small"
+          :tooltip="tip('canSetPageBorders', 'מסגרת סביב העמוד')"
+          :disabled="!can('canSetPageBorders')"
+          :items="pageBorderItems"
+          @select="onPageBorders"
+        />
+      </RibbonStack>
     </RibbonGroup>
 
-    <!-- קבוצה 2: מקטע. שלושת אלה יושבים ב-Word בדיאלוג „הגדרת עמוד → פריסה”
-         ובדיאלוג „עיצוב מספרי עמודים”, ולא בגלריות של הסרגל. -->
+    <!-- קבוצה 2: מקטע. „יישור אנכי”, „מספור עמודים” ו„מרחק הכותרת” יושבים
+         ב-Word בדיאלוג „הגדרת עמוד → פריסה” ובדיאלוג „עיצוב מספרי עמודים”,
+         ולא בגלריות של הסרגל; „ברירות מחדל” (גל 13) הוא רביעי ואינו משם אלא
+         מ„גופן → הגדר כברירת מחדל”. („שלושת אלה” שנכתב כאן קודם נשאר מאחור
+         כשהרביעי נוסף.)
+
+         „יישור אנכי” הוא הראשי, ושלושת האחרים במחסנית לצידו: הוא היחיד שנוגע
+         בזרימת הטקסט בעמוד; השאר הם הגדרות של המסמך. -->
     <RibbonGroup title="מקטע">
       <RibbonMenuButton
         icon="lineSpacing"
@@ -63,31 +79,33 @@
         :items="verticalAlignItems"
         @select="onVerticalAlign"
       />
-      <RibbonButton
-        icon="pageNumber"
-        label="מספור עמודים"
-        variant="large"
-        :tooltip="tip('canSetPageNumbering', 'תבנית מספרי העמודים ומספר ההתחלה')"
-        :disabled="!can('canSetPageNumbering')"
-        @click="onOpenPageNumbering"
-      />
-      <RibbonButton
-        icon="header"
-        label="מרחק הכותרת"
-        variant="large"
-        :tooltip="tip('canSetHeaderFooterMargins', 'מרחק הכותרת העליונה והתחתונה מקצה הדף')"
-        :disabled="!can('canSetHeaderFooterMargins')"
-        @click="onOpenHeaderDistance"
-      />
-      <!-- גל 13: ברירות מחדל לגופן של המסמך כולו (styles.apply על docDefaults). -->
-      <RibbonButton
-        icon="fontColor"
-        label="ברירות מחדל"
-        variant="large"
-        :tooltip="tip('canSetDocDefaults', 'גופן וגודל ברירת המחדל של המסמך כולו')"
-        :disabled="!can('canSetDocDefaults')"
-        @click="onOpenDocDefaults"
-      />
+      <RibbonStack>
+        <RibbonButton
+          icon="pageNumber"
+          label="מספור עמודים"
+          variant="small"
+          :tooltip="tip('canSetPageNumbering', 'תבנית מספרי העמודים ומספר ההתחלה')"
+          :disabled="!can('canSetPageNumbering')"
+          @click="onOpenPageNumbering"
+        />
+        <RibbonButton
+          icon="header"
+          label="מרחק הכותרת"
+          variant="small"
+          :tooltip="tip('canSetHeaderFooterMargins', 'מרחק הכותרת העליונה והתחתונה מקצה הדף')"
+          :disabled="!can('canSetHeaderFooterMargins')"
+          @click="onOpenHeaderDistance"
+        />
+        <!-- גל 13: ברירות מחדל לגופן של המסמך כולו (styles.apply על docDefaults). -->
+        <RibbonButton
+          icon="fontColor"
+          label="ברירות מחדל"
+          variant="small"
+          :tooltip="tip('canSetDocDefaults', 'גופן וגודל ברירת המחדל של המסמך כולו')"
+          :disabled="!can('canSetDocDefaults')"
+          @click="onOpenDocDefaults"
+        />
+      </RibbonStack>
     </RibbonGroup>
 
 
@@ -154,6 +172,7 @@
 import { computed, inject, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
+import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import RibbonMenuButton from '../common/RibbonMenuButton.vue';
 import PageNumberingDialog from '../../panels/PageNumberingDialog.vue';

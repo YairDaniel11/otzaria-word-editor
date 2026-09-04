@@ -7,6 +7,7 @@ import {
   applyHebrewDocumentDefaults,
   applyHebrewPaperSize,
   NEW_DOCUMENT_PAPER_SIZE,
+  verifyHebrewDocumentDefaults,
   type DefaultsDocumentApi,
 } from '../../src/engine/document-defaults';
 import { TWIPS_PER_INCH, type PageSetupDocumentApi } from '../../src/engine/page-setup';
@@ -318,5 +319,33 @@ describe('applyHebrewPaperSize', () => {
 
     expect(Math.round((calls[0]!.width as number) * TWIPS_PER_INCH)).toBe(16838);
     expect(Math.round((calls[0]!.height as number) * TWIPS_PER_INCH)).toBe(11906);
+  });
+});
+
+describe('verifyHebrewDocumentDefaults', () => {
+  const a4 = { width: 11906 / TWIPS_PER_INCH, height: 16838 / TWIPS_PER_INCH };
+  const withSection = (item: Record<string, unknown>) =>
+    fakeDoc({ sections: { list: () => Promise.resolve({ items: [item] }) } });
+
+  it('מקטע RTL בגודל A4 מאומת — בקריאה אחת, בלי כתיבה', async () => {
+    const { host, calls } = withSection({ address: {}, sectionDirection: 'rtl', pageSetup: a4 });
+    await expect(verifyHebrewDocumentDefaults(host)).resolves.toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it('מקטע LTR, Letter או ללא מידות — אינו מאומת', async () => {
+    await expect(
+      verifyHebrewDocumentDefaults(withSection({ sectionDirection: 'ltr', pageSetup: a4 }).host),
+    ).resolves.toBe(false);
+    await expect(
+      verifyHebrewDocumentDefaults(withSection({ sectionDirection: 'rtl', pageSetup: { width: 8.5, height: 11 } }).host),
+    ).resolves.toBe(false);
+    await expect(verifyHebrewDocumentDefaults(withSection({ sectionDirection: 'rtl' }).host)).resolves.toBe(false);
+  });
+
+  it('מנוע בלי sections.list, או שזורק — נכשל סגור', async () => {
+    await expect(verifyHebrewDocumentDefaults({ activeEditor: { doc: {} } })).resolves.toBe(false);
+    const throwing = fakeDoc({ sections: { list: () => Promise.reject(new Error('אין')) } });
+    await expect(verifyHebrewDocumentDefaults(throwing.host)).resolves.toBe(false);
   });
 });

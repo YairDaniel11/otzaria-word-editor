@@ -16,15 +16,28 @@
  */
 import type { EditorSession } from '../engine/create-editor';
 
-/** נקראת פעם אחת לכל ניסיון פתיחה, עם ה-host שנוצר עבורו. */
-export type OpenEditor = (host: HTMLElement, source?: string | File | Blob) => Promise<EditorSession>;
+/**
+ * נקראת פעם אחת לכל ניסיון פתיחה, עם ה-host שנוצר עבורו.
+ *
+ * ה-`signal` הוא של הניסיון הזה בלבד, והוא מורם כש-`cancel()` נקרא או
+ * כשפתיחה חדשה יותר החליפה אותו. מי שמממש חייב לכבד אותו: בלעדיו „ביטול”
+ * פירושו רק שהתוצאה נזרקת, בזמן שהמנוע ממשיך לבנות את המסמך עד הסוף.
+ */
+export type OpenEditor = (
+  host: HTMLElement,
+  source?: string | File | Blob,
+  signal?: AbortSignal,
+) => Promise<EditorSession>;
 
 export type SwapOutcome =
   /** המסמך החדש פעיל. */
   | { status: 'opened'; session: EditorSession }
   /** הפתיחה נכשלה. המסמך שהיה פעיל נשאר פעיל. */
   | { status: 'failed'; error: Error }
-  /** פתיחה חדשה יותר החליפה את הבקשה הזאת. */
+  /**
+   * הבקשה הזאת אינה עוד מה שמחכים לו: פתיחה חדשה יותר החליפה אותה, `cancel()`
+   * ביטל אותה, או ה-swap פורק. שלושתן אינן שגיאה ואין להן מה לומר למשתמש.
+   */
   | { status: 'superseded' };
 
 export const HOST_CLASS = 'editor-stack__host';
@@ -51,6 +64,35 @@ export interface EditorSwap {
    */
   readonly documentGeneration: number;
   open(source?: string | File | Blob): Promise<SwapOutcome>;
+  /**
+   * „דלג”: נוטש כל פתיחה שבדרך ומשאיר את המסמך הפעיל בדיוק כפי שהיה. מחזיר
+   * `false` כשלא היה מה לנטוש.
+   *
+   * מה שהוא עושה מעל „להתעלם מהתוצאה”: מרים את ה-`signal` של הפתיחה, וזה מה
+   * שמפרק את המנוע החצי-בנוי ומשחרר את ה-workers שלו. הפתיחה עצמה תסתיים
+   * כ-`superseded` — ולא כ-`failed` — מפני שהדור מתקדם לפני האיתות.
+   *
+   * מה שהוא **אינו** יכול: לשחרר חוט ראשי שנתקע בלולאה של המנוע. שם גם
+   * הלחיצה עצמה אינה מגיעה. ראו OPEN_TIMEOUT_MS ב-engine/create-editor.ts.
+   */
+  cancel(): boolean;
+  /**
+   * משחררת את המסמך הפתוח — המנוע, ה-workers וה-host שלו — ומשאירה את ה-swap
+   * מוכן לפתיחה חדשה על אותו container.
+   *
+   * זהו „טאב שנרדם”: מסמך ברקע שלא נגעו בו זמן מה משוחרר מהזיכרון, ונפתח שוב
+   * מהרשומה שלו כשחוזרים אליו (App.vue, `sleepTab`/`openPendingTab`). ההבדל
+   * מ-`destroy` אינו בכוונה בלבד: `destroy` הוא **סופי** — פתיחה אחריו
+   * מוחזרת כ-`superseded` ואינה נוגעת ב-container, שממילא כבר הוסר עם הטאב
+   * (`DocumentSession.destroy`). `close` משאיר את ה-swap פתוח לפתיחה הבאה.
+   */
+  close(): void;
+  /**
+   * פירוק סופי. משחרר כמו `close`, ובנוסף נועל: כל `open` שיגיע אחריו יוחזר
+   * כ-`superseded` בלי לבנות מנוע. בלי הנעילה, „close” ו„destroy” היו אותו
+   * דבר בדיוק, וההבחנה ביניהן הייתה הערה בלבד — כלומר פתיחה על טאב שכבר
+   * נסגר הייתה בונה מנוע שלם לתוך container שאינו במסמך.
+   */
   destroy(): void;
 }
 
@@ -61,8 +103,30 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
   /** ראו `EditorSwap.documentGeneration`. עולה רק כש-`current` באמת מוחלף. */
   let documentGeneration = 0;
   let pending = 0;
-  /** hosts של פתיחות שעוד לא הסתיימו, כדי ש-destroy יוכל לנקות גם אותם. */
-  const openingHosts = new Set<HTMLElement>();
+  /** ראו `EditorSwap.destroy` — פירוק סופי, בשונה מ-`close`. */
+  let destroyed = false;
+  /**
+   * הפתיחות שעוד לא הסתיימו: ה-host שלהן — כדי שנטישה תוכל לנקות אותו — וה-
+   * controller שמרים את האיתות. המפתח הוא ה-host, שהוא הזהות היחידה של ניסיון
+   * פתיחה שיש כאן משני הצדדים.
+   */
+  const opening = new Map<HTMLElement, AbortController>();
+
+  /**
+   * נוטש את כל מה שבדרך: מקדם את הדור, מסיר את ה-hosts, ומרים את האיתות.
+   *
+   * הדור **לפני** האיתות, ולא אחריו: הדחייה שהאיתות גורם מגיעה למסלול הכשל
+   * של `open`, ושם מה שקובע אם היא תדווח כשגיאה למשתמש או תיבלע כ-superseded
+   * הוא בדיוק המונה הזה.
+   */
+  function abandonPending(): void {
+    generation += 1;
+    for (const [host, controller] of opening) {
+      host.remove();
+      controller.abort();
+    }
+    opening.clear();
+  }
 
   function createHost(): HTMLElement {
     const host = document.createElement('div');
@@ -83,6 +147,23 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
     host?.remove();
   }
 
+  /**
+   * משחררת את הפתוח ואת מה שבדרך. `close` ו-`destroy` הן אותה פעולה בדיוק —
+   * ראו `EditorSwap.close`.
+   *
+   * כל פתיחה שבדרך תיראה את עצמה כמוחלפת ותפרק את עצמה. ה-host שלה מוסר כאן,
+   * כי הוא משתנה מקומי ב-`open` ואינו נגיש מבחוץ; פתיחה שלא תסתיים לעולם לא
+   * תשאיר אותו על המסך.
+   */
+  function release(): void {
+    abandonPending();
+    const previous = current;
+    const previousHost = currentHost;
+    current = null;
+    currentHost = null;
+    discard(previous, previousHost);
+  }
+
   return {
     get current() {
       return current;
@@ -97,16 +178,22 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
     },
 
     async open(source) {
+      // ה-swap פורק: אין container לפתוח לתוכו, ומנוע שייבנה כאן לא יראה
+      // אף אחד ולא ישוחרר בידי איש. `superseded` ולא `failed` — זו אינה
+      // תקלה שיש לדווח עליה למשתמש, בדיוק כמו פתיחה שהוחלפה.
+      if (destroyed) return { status: 'superseded' };
+
       const mine = ++generation;
       const host = createHost();
-      openingHosts.add(host);
+      const aborts = new AbortController();
+      opening.set(host, aborts);
       pending += 1;
 
       let session: EditorSession;
       try {
-        session = await openEditor(host, source);
+        session = await openEditor(host, source, aborts.signal);
       } catch (error) {
-        openingHosts.delete(host);
+        opening.delete(host);
         host.remove();
         pending -= 1;
         if (mine !== generation) return { status: 'superseded' };
@@ -115,7 +202,7 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
           error: error instanceof Error ? error : new Error(String(error)),
         };
       }
-      openingHosts.delete(host);
+      opening.delete(host);
       pending -= 1;
 
       // בקשה חדשה יותר כבר בדרך, או שכבר הוחלף: המועמד הזה מפרק את עצמו ואינו
@@ -139,18 +226,19 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
       return { status: 'opened', session };
     },
 
+    cancel() {
+      if (pending === 0) return false;
+      abandonPending();
+      return true;
+    },
+
+    close() {
+      release();
+    },
+
     destroy() {
-      // כל פתיחה שבדרך תיראה את עצמה כמוחלפת ותפרק את עצמה. ה-host שלה מוסר
-      // כאן, כי הוא משתנה מקומי ב-open ואינו נגיש מבחוץ; פתיחה שלא תסתיים
-      // לעולם לא תשאיר אותו על המסך.
-      generation += 1;
-      for (const host of openingHosts) host.remove();
-      openingHosts.clear();
-      const previous = current;
-      const previousHost = currentHost;
-      current = null;
-      currentHost = null;
-      discard(previous, previousHost);
+      release();
+      destroyed = true;
     },
   };
 }

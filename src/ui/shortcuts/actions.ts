@@ -61,6 +61,42 @@ export interface ShellActionDeps {
   openContextMenu: () => boolean;
   /** `F6` — מעביר את המיקוד לאזור הבא. מחזיר האם היה לאן. */
   moveFocusRegion: (direction: 'next' | 'prev') => boolean;
+  /**
+   * ## הטאבים
+   *
+   * חמש הפעולות שמתחת אינן מחזירות `boolean`, בשונה מ-`escape`, מהמאקרו
+   * ומתפריט ההקשר — כלומר **קיצור טאב נבלע תמיד**, גם כשלא זז דבר.
+   *
+   * זו הכרעה ולא השמטה. ערך ההחזרה קיים כדי לא לגזול מהדפדפן התנהגות
+   * שהמשתמש עדיין רוצה, ובקבוצה הזאת אין כזאת: `Ctrl+W` של WebView2 סוגר את
+   * החלון שהתוסף יושב בו, `Ctrl+T` פותח לשונית דפדפן, ו-`Ctrl+Tab` מדלג בין
+   * לשוניות שאין למשתמש דרך לראות. שלושתם הם בדיוק מה שאסור שיקרה בתוך
+   * מסמך פתוח. „טאב יחיד ולחצו `Ctrl+Tab`” הוא המקרה שבו לא זז דבר — והוא
+   * מקביל ל-`Ctrl+S` בזמן שמירה: התעלמנו בכוונה, וזו עדיין תשובה.
+   */
+  /** טאב חדש — בדיוק כמו כפתור „+” ברצועת הטאבים. */
+  newTab: () => void;
+  /** סוגר את הטאב הפעיל, כולל השאלה על מה שלא נשמר. */
+  closeTab: () => void;
+  /** פותח מחדש את הטאב האחרון שנסגר. מדווח בעצמו כשאין כזה. */
+  reopenClosedTab: () => void;
+  /** הטאב הבא/הקודם **בסדר הרצועה**, עם גלישה מהסוף להתחלה. */
+  stepTab: (direction: 'next' | 'prev') => void;
+  /**
+   * מעבר לטאב לפי מיקומו ברצועה. `position` הוא מבוסס-1, ו-`'last'` הוא
+   * האחרון — בדיוק כמו `Ctrl+9` בדפדפן, שאינו „טאב מספר 9”.
+   */
+  goToTab: (position: number | 'last') => void;
+  /** `Alt+Q` — מיקוד תיבת החיפוש והפקודות (Tell Me). */
+  openTellMe: () => void;
+}
+
+/**
+ * המיקום שברשומת `tab-goto`. `null` = ה-payload אינו מיקום, ואז אין לאן
+ * לעבור — רשומה כזאת נעצרת בבדיקת החוזה, ולא כאן.
+ */
+function tabPosition(payload: unknown): number | null {
+  return typeof payload === 'number' && Number.isInteger(payload) && payload >= 1 ? payload : null;
 }
 
 /**
@@ -72,8 +108,10 @@ export interface ShellActionDeps {
  * היא כן „טופלה” (התעלמנו בכוונה), והבליעה נחוצה כדי שה-WebView לא יפתח את
  * דיאלוג „שמירת דף” שלו.
  */
-export function createShellActionRunner(deps: ShellActionDeps): (action: ShellAction) => boolean {
-  return (action) => {
+export function createShellActionRunner(
+  deps: ShellActionDeps,
+): (action: ShellAction, payload?: unknown) => boolean {
+  return (action, payload) => {
     switch (action) {
       case 'save':
       case 'save-as':
@@ -145,6 +183,28 @@ export function createShellActionRunner(deps: ShellActionDeps): (action: ShellAc
         return deps.toggleMacrosDialog();
       case 'shortcuts-help':
         return deps.toggleShortcutsHelp();
+      // ראו „הטאבים” ב-`ShellActionDeps`: כל החמש נבלעות תמיד.
+      case 'tab-new':
+        deps.newTab();
+        return true;
+      case 'tab-close':
+        deps.closeTab();
+        return true;
+      case 'tab-reopen':
+        deps.reopenClosedTab();
+        return true;
+      case 'tab-next':
+      case 'tab-prev':
+        deps.stepTab(action === 'tab-next' ? 'next' : 'prev');
+        return true;
+      case 'tab-goto': {
+        const position = tabPosition(payload);
+        if (position !== null) deps.goToTab(position);
+        return true;
+      }
+      case 'tab-goto-last':
+        deps.goToTab('last');
+        return true;
       // „אין עוגן” אינו „טופל”: בלי מלבן סמן אין איפה לפתוח את התפריט, ובליעת
       // הצירוף הייתה משאירה את המשתמש בלי תפריט ובלי הודעה.
       case 'context-menu':
@@ -155,6 +215,9 @@ export function createShellActionRunner(deps: ShellActionDeps): (action: ShellAc
         return deps.moveFocusRegion('next');
       case 'focus-prev-region':
         return deps.moveFocusRegion('prev');
+      case 'tell-me':
+        deps.openTellMe();
+        return true;
     }
   };
 }

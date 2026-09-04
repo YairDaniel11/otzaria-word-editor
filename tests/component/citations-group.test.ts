@@ -8,7 +8,7 @@
  * — הן ההכרעות שנמדדו בדפדפן, וההנמקה שלהן ב-engine/citations.ts.
  */
 import { describe, expect, it } from 'vitest';
-import { autoUnmount, createSuperdocDouble, mountUi, settle } from './harness';
+import { autoUnmount, createSuperdocDouble, mountUi, settle, tipMessage } from './harness';
 
 import ReferencesTab from '../../src/ui/ribbon/tabs/ReferencesTab.vue';
 import CitationSourceDialog from '../../src/ui/panels/CitationSourceDialog.vue';
@@ -99,7 +99,7 @@ describe('הרצועה', () => {
 
     const manage = button(harness, 'נהל מקורות');
     expect(manage.attributes('disabled')).toBeDefined();
-    expect(manage.attributes('title')).toContain('אינה זמינה');
+    expect(tipMessage(manage)).toContain('אינה זמינה');
   });
 
   it('הקבוצות שקדמו לגל הזה נשארו על מקומן', async () => {
@@ -110,11 +110,15 @@ describe('הרצועה', () => {
     expect(titles).toEqual([
       'תוכן עניינים',
       'הערות שוליים',
-      'הפניות מקושרות',
       'מפתח',
       'ציטוטים וביבליוגרפיה',
       // גל 8 הוסיף קבוצה שישית **בסופה** של הלשונית. הבדיקה הזאת מקבעת שאף
       // אחת מהקודמות לא זזה, וזה בדיוק מה שהיא ממשיכה לקבע.
+      //
+      // חמש ולא שש: „הפניות מקושרות” אינה קבוצה עוד. הפקד היחיד שהיה בה,
+      // „עדכן הפניות”, עבר ל„כיתובים” — שם „הפניה מקושרת” יושבת ב-Word העברי
+      // (ההנמקה המלאה בהערת הפתיחה של ReferencesTab.vue). הסדר של השאר,
+      // שזה מה שהבדיקה שומרת, לא זז.
       'כיתובים',
     ]);
   });

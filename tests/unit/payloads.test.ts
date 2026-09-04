@@ -18,6 +18,7 @@ import {
   normalizeLinkHref,
   parseColor,
   parseFontFamily,
+  parseFontSizeInput,
   parseFontSizePt,
   parseLineHeight,
   shrunkFontSize,
@@ -125,6 +126,65 @@ describe('סולם הגדלים של Word', () => {
   it('הסולם הוא של Word, וברירת המחדל עליו', () => {
     expect(WORD_FONT_SIZES).toEqual([8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72]);
     expect(WORD_FONT_SIZES).toContain(DEFAULT_FONT_SIZE_PT);
+  });
+});
+
+describe('parseFontSizeInput — גודל שהוקלד בתיבה', () => {
+  it('גודל שאינו בסולם מתקבל כמות שהוא — זה כל מה שההקלדה נועדה לה', () => {
+    expect(parseFontSizeInput('13')).toBe(13);
+    expect(parseFontSizeInput('15')).toBe(15);
+    expect(parseFontSizeInput('10.5')).toBe(10.5);
+    expect(parseFontSizeInput('13pt')).toBe(13);
+  });
+
+  it('מעוגל לחצי נקודה — `w:sz` הוא חצאי נקודות, ותיבה לא תציג מה שלא נכתב', () => {
+    expect(parseFontSizeInput('12.3')).toBe(12.5);
+    expect(parseFontSizeInput('12.1')).toBe(12);
+    expect(parseFontSizeInput('0.2')).toBe(1);
+  });
+
+  it('מהודק לטווח של המסמך במקום דיאלוג שגיאה', () => {
+    expect(parseFontSizeInput('5000')).toBe(1638);
+    expect(parseFontSizeInput('1638')).toBe(1638);
+    expect(parseFontSizeInput('1')).toBe(1);
+  });
+
+  it('מה שאינו גודל אינו מוחל — התיבה חוזרת למסמך', () => {
+    expect(parseFontSizeInput('')).toBeNull();
+    expect(parseFontSizeInput('גדול')).toBeNull();
+    expect(parseFontSizeInput('0')).toBeNull();
+    expect(parseFontSizeInput('-12')).toBeNull();
+    expect(parseFontSizeInput('NaN')).toBeNull();
+    expect(parseFontSizeInput('Infinity')).toBeNull();
+    // `\d` הוא ASCII בלבד, ולכן ספרות ערביות-הודיות אינן גודל.
+    expect(parseFontSizeInput('١٢')).toBeNull();
+  });
+
+  it('פסיק עשרוני הוא עשרוני — „12,5” אינו 12', () => {
+    // הפסיק הוא סימן העשרוני של המקלדת העברית, ו-`parseFloat` בלע אותו
+    // בשקט: „12,5” יצא 12 בלי שום סימן שהחצי נעלם.
+    expect(parseFontSizeInput('12,5')).toBe(12.5);
+    expect(parseFontSizeInput('12,25')).toBe(12.5);
+    expect(parseFontSizeInput('12,5pt')).toBe(12.5);
+    expect(parseFontSizeInput(',5')).toBe(1);
+  });
+
+  it('זנב שאינו pt נדחה, ולא נבלע — פענוח חלקי הוא מה שהסתיר את הפסיק', () => {
+    expect(parseFontSizeInput('12px')).toBeNull();
+    expect(parseFontSizeInput('12abc')).toBeNull();
+    expect(parseFontSizeInput('1 2')).toBeNull();
+    expect(parseFontSizeInput('12.5.5')).toBeNull();
+  });
+
+  it('ומה שהיה תקין נשאר תקין: `pt`, רווחים מסביב, ונקודה בלי שלם', () => {
+    expect(parseFontSizeInput('12pt')).toBe(12);
+    expect(parseFontSizeInput('  12  ')).toBe(12);
+    expect(parseFontSizeInput(' 12 pt ')).toBe(12);
+    expect(parseFontSizeInput('12PT')).toBe(12);
+    expect(parseFontSizeInput('.5')).toBe(1);
+    expect(parseFontSizeInput('0.4')).toBe(1);
+    expect(parseFontSizeInput('12.25')).toBe(12.5);
+    expect(parseFontSizeInput('1638.4')).toBe(1638);
   });
 });
 

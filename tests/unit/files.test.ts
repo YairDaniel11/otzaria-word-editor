@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   MAX_IMAGE_BYTES,
+  commitUserFileWrite,
   pickDocxFile,
   pickImageFile,
   readImageAsDataUrl,
@@ -43,8 +44,11 @@ describe('pickDocxFile', () => {
       access: 'readwrite',
     });
     // ברירת המחדל היא readwrite, אחרת „שמור” יצטרך דיאלוג בכל פעם.
+    // `docm` ברשימה: מסמך עם מאקרו הוא אותה חבילת OOXML בדיוק, ובלי הסיומת
+    // הזאת הוא לא הופיע בבורר כלל — למשתמש לא הייתה שום דרך לפתוח את המסמך
+    // שהוא עובד עליו שנים.
     expect(call).toHaveBeenCalledWith('fs.pickUserFile', {
-      extensions: ['docx'],
+      extensions: ['docx', 'docm'],
       access: 'readwrite',
     });
   });
@@ -55,10 +59,25 @@ describe('pickDocxFile', () => {
     await pickDocxFile({ title: 'בחר מסמך' });
 
     expect(call).toHaveBeenCalledWith('fs.pickUserFile', {
-      extensions: ['docx'],
+      extensions: ['docx', 'docm'],
       access: 'readwrite',
       title: 'בחר מסמך',
     });
+  });
+
+  it('מחזירה מסמך עם מאקרו כמו כל מסמך אחר', async () => {
+    hostReturns({
+      cancelled: false,
+      token: 'tok',
+      url: 'http://127.0.0.1:1/f',
+      name: 'מאקרו.docm',
+      size: 99,
+      access: 'readwrite',
+    });
+
+    // הבורר אינו מבחין בין השניים, וגם אינו אמור: מה שמבחין הוא סיומת השמירה
+    // (engine/export.ts) וקריאת המאקרו (engine/vba-import.ts).
+    await expect(pickDocxFile()).resolves.toMatchObject({ name: 'מאקרו.docm' });
   });
 
   it('בלי הרשאת כתיבה נופלת לקריאה בלבד ולא מפילה את הפתיחה', async () => {
@@ -374,5 +393,127 @@ describe('readImageAsDataUrl', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.dataUrl.startsWith('data:image/png;base64,QUFB')).toBe(true);
+  });
+});
+
+/**
+ * הסיומת שנשלחת ל-`fs.commitUserFileWrite` היא מה שהמאחז מצמיד לשם בדיאלוג
+ * „שמור בשם”, ומה שהוא מסנן לפיו. `docx` קבוע היה מציע לשמור את `ספר.docm`
+ * בשם `ספר.docm.docx` — המאחז מצמיד את הסיומת אלא אם השם כבר מסתיים בה —
+ * כלומר בדיוק חבילה עם `vbaProject` שנושאת שם `.docx`, מה שהעורך אמור
+ * למנוע. ראו `resolveSaveExtension` ב-engine/export.ts.
+ */
+describe('commitUserFileWrite — הסיומת', () => {
+  it('מעבירה את הסיומת המבוקשת למאחז', async () => {
+    const call = hostReturns({ cancelled: false, token: 'tok', name: 'ספר.docm', size: 10 });
+
+    await commitUserFileWrite({ writeToken: 'w1', suggestedName: 'ספר.docm', extension: 'docm' });
+
+    expect(call).toHaveBeenCalledWith('fs.commitUserFileWrite', {
+      writeToken: 'w1',
+      suggestedName: 'ספר.docm',
+      extension: 'docm',
+    });
+  });
+
+  it('בלי סיומת מפורשת נשארת docx — התנהגות המסלול הרגיל', async () => {
+    const call = hostReturns({ cancelled: false, token: 'tok', name: 'ספר.docx', size: 10 });
+
+    await commitUserFileWrite({ writeToken: 'w1', suggestedName: 'ספר.docx' });
+
+    expect(call).toHaveBeenCalledWith(
+      'fs.commitUserFileWrite',
+      expect.objectContaining({ extension: 'docx' }),
+    );
+  });
+});
+
+/**
+ * „Failed to fetch” של ה-PUT הוא כל מה שהדפדפן אומר, ולכן `uploadBytes`
+ * מריצה בדיקה אחת שמבחינה בין „השרת אינו נגיש” ל„דווקא ה-PUT נחסם”, ומצמידה
+ * את הממצא להודעה — שורת המצב היא ערוץ הדיווח בפועל.
+ *
+ * הבדיקה כאן היא על **הכשל השני**: קודם עמד שם דגל בוליאני שכיבה את האבחון
+ * אחרי הפעם הראשונה, ולכן אותה תקלה בדיוק הציגה „העלאת המסמך נכשלה: Failed
+ * to fetch” חשוף מהניסיון השני והלאה. הבדיקה עצמה עדיין רצה פעם אחת.
+ */
+describe('uploadBytes — אבחון כשל רשת', () => {
+  it('הממצא מוצמד לכל כשל, וה-probe נשלח פעם אחת', async () => {
+    vi.resetModules();
+    const { uploadBytes } = await import('../../src/host/files');
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/f/probe')) return { status: 404 } as Response;
+      throw new TypeError('Failed to fetch');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const put = (): Promise<Error> =>
+      uploadBytes('http://127.0.0.1:1/w/tok', new Blob(['x'])).then(
+        () => new Error('לא נזרק'),
+        (error: unknown) => error as Error,
+      );
+
+    const first = await put();
+    const second = await put();
+
+    for (const failure of [first, second]) {
+      expect(failure.message).toContain('העלאת המסמך נכשלה');
+      expect(failure.message).toContain('ה-PUT עצמו נחסם');
+      expect(failure.message).toContain('נדרש עדכון');
+    }
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/f/probe')),
+    ).toHaveLength(1);
+  });
+
+  /**
+   * הבדיקה נשמרת בין כשלים — אבל ה-`יעד` לא. לכל שמירה יש `uploadUrl` משלה
+   * (write-token אחר, ולעיתים מסמך אחר), וכששמרנו את מחרוזת האבחון כולה
+   * הכשל השני הציג בשורת המצב את היעד של הראשון. מכיוון שצילום המסך של
+   * שורת המצב הוא הדיווח בפועל, זה נראה כמו כתיבה ל-token ישן שלא קרתה.
+   */
+  it('היעד הוא של הכשל הנוכחי ולא של הראשון, אף שה-probe נשמר', async () => {
+    vi.resetModules();
+    const { uploadBytes } = await import('../../src/host/files');
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/f/probe')) return { status: 404 } as Response;
+      throw new TypeError('Failed to fetch');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const put = (uploadUrl: string): Promise<Error> =>
+      uploadBytes(uploadUrl, new Blob(['x'])).then(
+        () => new Error('לא נזרק'),
+        (error: unknown) => error as Error,
+      );
+
+    const first = await put('http://127.0.0.1:1/w/token-ראשון');
+    const second = await put('http://127.0.0.1:1/w/token-שני');
+
+    expect(first.message).toContain('יעד=http://127.0.0.1:1/w/token-ראשון');
+    expect(second.message).toContain('יעד=http://127.0.0.1:1/w/token-שני');
+    expect(second.message).not.toContain('token-ראשון');
+    // הממצא עצמו עדיין נשמר: הכשל השני לא הריץ בדיקה חדשה.
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/f/probe')),
+    ).toHaveLength(1);
+  });
+
+  it('שרת שאינו נגיש — הממצא אומר זאת, בלי לתלות את הכשל בגרסת אוצריא', async () => {
+    vi.resetModules();
+    const { uploadBytes } = await import('../../src/host/files');
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Failed to fetch');
+      }),
+    );
+
+    await expect(
+      uploadBytes('http://127.0.0.1:1/w/tok', new Blob(['x'])),
+    ).rejects.toThrow(/השרת אינו נגיש מהדף/);
   });
 });

@@ -239,6 +239,123 @@ export function isFamilyAvailable(name: string): boolean {
   );
 }
 
+/** מחרוזת המדידה לכיסוי עברית בלבד. ראו `coversHebrew`. */
+const HEBREW_PROBE_TEXT = 'אבגדהוזחטיכלמנסעפצקרשת';
+
+/**
+ * בסיסי המדידה של `coversHebrew` — שלושה, וכל אחד מהם קונה משהו אחר.
+ *
+ * `sans-serif` נוסף אחרי מדידה: `Times New Roman` — הדוגמה שהתיעוד עצמו
+ * מביא — יצא `false`. הסיבה אינה באג בקוד אלא בבסיסים: ב-Windows `serif`
+ * **הוא** Times New Roman, ולכן ההשוואה מולו שווה מהגדרה; ומול `monospace`
+ * גם כן, מפני ש-Courier New אינו מכסה עברית ונופל בעצמו ל-fallback שהוא
+ * Times New Roman. משפחה שהיא עצמה ברירת המחדל של בסיס ניתנת לזיהוי רק דרך
+ * בסיס **אחר** שברירת המחדל שלו שונה — וזה `sans-serif` (Arial).
+ *
+ * ולמה זה אינו מייצר חיובי-שגוי: התאמת הגופן ב-CSS היא לכל תו בנפרד, ולכן
+ * גופן בלי עברית נופל בשרשרת `"F", B` בדיוק ל-`B` — כלומר מודד את `B` בכל
+ * אחד משלושת הבסיסים. נמדד בכרום ב-Windows על כל השמות שאמורים לצאת שליליים
+ * (Wingdings 1/2/3, Webdings, Symbol, Marlett, Cambria Math, MS Gothic,
+ * SimSun, Malgun Gothic, Yu Gothic, Nirmala UI, Ebrima, Leelawadee UI, ושם
+ * שאינו מותקן) — כולם נשארו `false`.
+ */
+const HEBREW_PROBE_BASES: readonly string[] = ['monospace', 'serif', 'sans-serif'];
+
+/**
+ * זיכרון התשובות. `coversHebrew` נשאלת על כל שם ברשימה בכל מיזוג מחדש — מאות
+ * שמות, וכל מיזוג הוא דיווח של המנוע.
+ *
+ * המפתח ממותת (`familyProbeKey`) ונושא את **דור** האליאסים, ושני אלה הם
+ * תיקונים של תשובות שנמדדו שגויות:
+ *
+ * 1. **רישיות.** `Arial`, `ARIAL` ו-`arial` נמדדו כשלוש רשומות ושלוש מדידות,
+ *    בזמן ש-`familyKey` ב-font-options.ts ממותת ומאחד אותן לאפשרות אחת.
+ * 2. **דור.** `installDocumentFontAliases` דורס את `@font-face` בכל מסמך,
+ *    כלומר התשובה **כן** משתנה תוך ההפעלה, ולשני הכיוונים: גופן שנפתר רק
+ *    דרך האליאס נמדד `false` לפני ההזרקה ונשאר מסווג „בלי עברית” לתמיד
+ *    (נמדד: `FrankRuhlCLM=false`), ו-`true` שנמדד בזכות מסמך א' נשאר אחרי
+ *    שמסמך ב' דרס את הסגנון — ואז הדגימה נצבעת ב-fallback, בדיוק מה שהדגל
+ *    קיים כדי למנוע.
+ */
+const hebrewCoverage = new Map<string, boolean>();
+
+/**
+ * הדור הנוכחי של `@font-face` המוזרק. מתקדם בכל `installDocumentFontAliases`.
+ */
+let aliasGeneration = 0;
+
+/** המפתח שתשובת הכיסוי נשמרת תחתיו. ראו `hebrewCoverage`. */
+function familyProbeKey(name: string): string {
+  return `${aliasGeneration} ${name.trim().toLowerCase()}`;
+}
+
+/**
+ * מודיעה שהאליאסים הוזרקו מחדש, ולכן כל תשובת כיסוי שנמדדה קודם אינה תקפה.
+ *
+ * הדור במפתח הוא מה שמפריד; הניקוי הוא כדי שהמפה לא תגדל בכל מסמך שנפתח.
+ */
+function advanceAliasGeneration(): void {
+  aliasGeneration += 1;
+  hebrewCoverage.clear();
+}
+
+/**
+ * האם הגופן מצייר עברית **בעצמו**.
+ *
+ * זו שאלה אחרת מ-`isFamilyAvailable`, והבחנה שהבורר חי ממנה: שם שהדפדפן פותר
+ * אינו בהכרח שם שיש בו אות עברית אחת. הבורר מציג דגימה של אותיות עבריות ליד
+ * כל גופן שמכסה עברית, ודגימה בגופן שאינו מכסה הייתה נופלת ל-fallback — כלומר
+ * מציגה את האותיות של גופן **אחר** תחת השם הזה.
+ *
+ * המדידה: רוחב מחרוזת עברית במשפחה מול הרוחב באותה שרשרת בלי המשפחה. גופן
+ * בלי עברית נופל בדיוק לאותו fallback בשני המקרים ומודד זהה; גופן שמכסה
+ * מצייר משלו ונבדל. שלושה בסיסים ולא אחד — ראו `HEBREW_PROBE_BASES`, כולל
+ * למה `sans-serif` הוא זה שמזהה את `Times New Roman` עצמו.
+ *
+ * **`false` כשאין canvas**, וזה ההפך מ-`isFamilyAvailable`: שם „בלי מדידה אל
+ * תיגע” הוא הצד הבטוח, וכאן הצד הבטוח הוא לא להבטיח. דגימה שלא נמדדה היא
+ * דגימה שעלולה לשקר.
+ *
+ * ## למה זה החליף רשימה מתוחזקת ביד
+ *
+ * הסיווג היה קודם רשימת מועמדים ב-system-fonts.ts, וזה עבד רק על מה שברשימה:
+ * גופן עברי שמותקן במכונה ולא נכתב בה — או גופן שהמסמך עצמו משתמש בו והמנוע
+ * הביא — הופיע בבורר בלי דגימה ובקבוצה הלא נכונה. זה דווח, וזו התשובה: מודדים
+ * את מה שיש, במקום לנחש מראש מה יהיה.
+ */
+export function coversHebrew(name: string): boolean {
+  const key = familyProbeKey(name);
+  const cached = hebrewCoverage.get(key);
+  if (cached !== undefined) return cached;
+
+  const context = measurementContext();
+  if (!context) return false;
+
+  const width = (font: string): number => {
+    context.font = font;
+    return context.measureText(HEBREW_PROBE_TEXT).width;
+  };
+  const quoted = JSON.stringify(name.trim());
+  const covers = HEBREW_PROBE_BASES.some(
+    (base) => width(`72px ${quoted}, ${base}`) !== width(`72px ${base}`),
+  );
+
+  hebrewCoverage.set(key, covers);
+  return covers;
+}
+
+/**
+ * האם יש כאן במה למדוד בכלל.
+ *
+ * `isFamilyAvailable` מחזירה „זמין” כשאין canvas, וזו ההכרעה הנכונה **שם**:
+ * להחליף גופן על סמך ניחוש גרוע מלא לגעת. למי שבונה **רשימה** ההכרעה הפוכה
+ * בדיוק — בלי מדידה עדיף בורר קצר ואמיתי מאשר עשרות שמות שאיש אינו יודע אם
+ * קיימים. לכן השאלה „אפשר למדוד?” נחשפת בנפרד מהתשובה „זמין?”.
+ */
+export function canMeasureFonts(): boolean {
+  return measurementContext() !== null;
+}
+
 let probeContext: CanvasRenderingContext2D | null | undefined;
 
 /** `null` בסביבה בלי canvas — jsdom, למשל. נבנה פעם אחת. */
@@ -307,6 +424,9 @@ export function substitutesFor(font: DeclaredFont): string[] {
  *
  * מחזירה את שמות המשפחות שלא נפתרו, לדיווח ולבדיקה. רשימה ריקה פירושה שהכול
  * נמצא במכונה ואין מה להחליף.
+ *
+ * ומקדמת את דור הכיסוי: הסגנון שנדרס כאן הוא בדיוק מה ש-`coversHebrew` מודדת
+ * מולו, ותשובה שנמדדה מול הסגנון הקודם אינה תקפה יותר. ראו `hebrewCoverage`.
  */
 export async function installDocumentFontAliases(fontTableXml: string | null): Promise<string[]> {
   const style = aliasStyleElement();
@@ -319,6 +439,11 @@ export async function installDocumentFontAliases(fontTableXml: string | null): P
   const hosted = await hostFontFaceCss(plan.needBytes);
 
   style.textContent = [plan.css, hosted].filter((part) => part !== '').join('\n');
+  // אחרי הכתיבה ולא לפניה, ו-`hostFontFaceCss` שבאמצע הוא הסיבה: מדידה
+  // שנעשית בזמן ה-await נמדדת מול הסגנון הקודם, ואם הדור כבר התקדם היא
+  // נשמרת תחת הדור החדש ונשארת שם שגויה. כאן היא נשמרת תחת הדור הישן,
+  // כלומר נזרקת בשורה הבאה.
+  advanceAliasGeneration();
   return plan.missing.map((font) => font.name);
 }
 

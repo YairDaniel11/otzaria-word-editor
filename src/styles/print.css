@@ -42,15 +42,46 @@
 
   /* פס הכותרת, הרצועה, שורת המצב והדיאלוגים — בשורה אחת, לפי מקומם במעטפת
      ולא לפי שמם. זה מכוון: פקד או פאנל שיתווסף למעטפת מאוחר יותר לא ידפיס את
-     עצמו בלי שאיש ישים לב. */
-  .word-app-shell > :not(.editor-stack) {
+     עצמו בלי שאיש ישים לב.
+
+     **הכלל חל על כל רמה בשרשרת שמובילה למסמך — לא על אחת ולא על שתיים.** כך
+     הוא נשבר: הוא נכתב כש-`.editor-stack` היה ילד ישיר של המעטפת, ומאז נכנס
+     `.editor-area` בין השניים (הסרגל האנכי ושכבות ה-overlay חיות בו) — והכלל
+     הפסיק לפסוח על אזור המסמך, הוא הסתיר אותו. נמדד במדיית print:
+     `.editor-area` קיבל `display: none` ברוחב 0, כלומר „הדפסה” הוציאה גיליון
+     ריק.
+
+     השרשרת המלאה, כפי שהיא נמדדת בדפדפן:
+     `body → #app → .word-app-shell → .editor-area → .editor-stack →
+     .document-pane → .editor-stack__host → .superdoc`. שש רמות, ושלוש מהן
+     (`#app`, `.editor-stack`, `.document-pane`) לא היו כאן — וזה נמדד ולא
+     הונח: „פאנל עתידי” של 120px שנשתל כילד נוסף בכל רמה **הודפס** בשלושתן,
+     ו-`body.scrollHeight` במדיית print עלה בדיוק ב-3×120.
+     `.editor-stack__host` הוא הרמה האחרונה — מה שמתחתיו הוא כבר העץ של
+     המנוע, כלומר המסמך עצמו.
+
+     `body > :not(#app)` הוא באותה רשימה מטעם משלו: דיאלוגים שעושים Teleport
+     ל-body (ראו LinkDialog.vue) יוצאים מהעץ של המעטפת, ולכן שום כלל שמתחיל
+     ב-`.word-app-shell` אינו מגיע אליהם.
+
+     הקינון עצמו הוא הנחה, והוא נשען על `App.vue` — ולכן הוא מקובע כעץ DOM
+     אמיתי ב-`tests/component/app-shell.test.ts` ולא בסריקת טקסט על הקובץ
+     הזה: בדיקה על תוכן ה-CSS אינה יכולה לדעת מה מכיל את מה, וזו בדיוק
+     הסיבה שהרגרסיה של `.editor-area` נכנסה בירוק. */
+  body > :not(#app),
+  #app > :not(.word-app-shell),
+  .word-app-shell > :not(.editor-area),
+  .editor-area > :not(.editor-stack),
+  .editor-stack > :not(.document-pane),
+  .document-pane > :not(.editor-stack__host) {
     display: none !important;
   }
 
-  /* דיאלוגים שעושים Teleport ל-body (ראו LinkDialog.vue) יוצאים מהעץ של
-     המעטפת, ולכן הכלל שמעל אינו מגיע אליהם. */
-  body > :not(#app) {
-    display: none !important;
+  /* אזור המסמך חוזר לזרימה רגילה. ה-`flex` וה-`position: relative` שלו הם של
+     המסך — שכבות ה-overlay נמדדות מולו — ובגיליון אין להם תפקיד. */
+  .editor-area {
+    display: block !important;
+    position: static !important;
   }
 
   /* אזור המסמך: `position: absolute` על מיכל הגלילה נותן לו גובה של חלון
@@ -62,7 +93,29 @@
     background: none !important;
   }
 
-  .editor-stack__host {
+  /* פאנל הטאב (`:global(.document-pane)` ב-App.vue) הוא `position: absolute;
+     inset: 0` — כך כל טאב פתוח מקבל את מלוא אזור המסמך, ורק הפעיל נראה. בגיליון
+     הוא חייב לחזור לזרימה: בלעדיו ערימת העמודים יוצאת מהזרימה של כל הוריה,
+     גובהם 0 — נמדד, כולל `document.body` — והדפדפן מדפיס גיליון אחד חתוך.
+     זה נמצא רק אחרי שהכלל שמעל תוקן: כל עוד אזור המסמך היה מוסתר לגמרי, לא
+     היה מה למדוד. */
+  .document-pane {
+    position: static !important;
+    height: auto !important;
+  }
+
+  /* **חוץ מה-host של פתיחה שעוד בדרך.** בזמן פתיחה יושבים בפאנל שניים —
+     הפעיל, והמועמד שנבנה (`PENDING_CLASS` ב-sessions/editor-swap.ts) — ולשניהם
+     `.editor-stack__host`, ולכן הכלל הזה החזיר לזרימה גם את המועמד. הוא
+     `visibility: hidden` (styles/shell.css) ולכן אינו **נצבע**, אבל שטח הוא כן
+     תופס: עמוד אחרי עמוד של לבן, באורך המסמך שהוא בונה.
+
+     `:not(...)` ולא `display: none` עליו: shell.css קובע במפורש „ל-host שנטען
+     חייב להיות box אמיתי, אחרת המנוע מודד עימוד באלמנט בגודל אפס”, והדפסה
+     אפשרית בדיוק בזמן פתיחה — `onPrint` בודק `swap.current`, שבפתיחה במקום הוא
+     עדיין המסמך הישן. כך המועמד נשאר `position: absolute` של shell.css: מחוץ
+     לזרימה, בלי גיליונות, ועם קופסה. */
+  .editor-stack__host:not(.editor-stack__host--pending) {
     position: static !important;
     height: auto !important;
     overflow: visible !important;
@@ -110,12 +163,23 @@
     page-break-after: auto !important;
     break-after: auto !important;
   }
+
+  /* הסתרת סמן העריכה ושכבת הבחירה בהדפסה */
+  .sd-v2-local-selection-caret,
+  [data-v2-selection-overlay] {
+    display: none !important;
+  }
 }
 
 /* ברירת המחדל כשגודל הדף לא נקרא מהמסמך: בלי שוליים כפולים. השוליים של
    המסמך באים מה-DOCX ומצוירים בתוך תיבת העמוד; שוליים של דפדפן מעליהם דוחקים
-   את התוכן ומולידים עמוד נוסף. engine/print.ts דורס את החוק הזה עם `size`
-   כשהוא כן נקרא. */
+   את התוכן ומולידים עמוד נוסף. engine/print.ts דורס את החוק הזה עם `size` —
+   מהמסמך כשהוא נקרא, ומהעמוד המצויר בפועל כשלא (`measurePrintPageSize`).
+
+   `size` אינו כאן, וזה מכוון: אין לו ערך נכון סטטי. ה-`@page` הזה בלעדיו
+   פירושו „הנייר של הדיאלוג” — כלומר Letter (1056px) מול תיבת עמוד A4
+   (1122.53px), ומסמך של עמוד אחד שיוצא בשני גיליונות. זו הסיבה שההזרקה
+   מ-engine/print.ts תמיד מנסה שני מקורות לפני שהיא מסתפקת בחוק הזה. */
 @page {
   margin: 0;
 }

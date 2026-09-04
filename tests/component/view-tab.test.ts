@@ -15,7 +15,7 @@ import ViewTab from '../../src/ui/ribbon/tabs/ViewTab.vue';
 import { ZOOM_PERCENT_MAX } from '../../src/engine/zoom';
 import {
   autoUnmount,
-  buttonByTitle,
+  buttonByTip,
   createSuperdocDouble,
   mountUi,
   settle,
@@ -55,7 +55,7 @@ describe('כפתורי לשונית „תצוגה”', () => {
     const harness = mountUi(ViewTab);
     await settle();
 
-    await buttonByTitle(harness.wrapper, HUNDRED_TITLE).trigger('click');
+    await buttonByTip(harness.wrapper, HUNDRED_TITLE).trigger('click');
     await settle();
 
     expect(harness.adapter.payloads('zoom')).toEqual([100]);
@@ -70,7 +70,7 @@ describe('כפתורי לשונית „תצוגה”', () => {
       const harness = mountWithPageWidth(A4_WIDTH_IN);
       await settle();
 
-      await buttonByTitle(harness.wrapper, FIT_TITLE).trigger('click');
+      await buttonByTip(harness.wrapper, FIT_TITLE).trigger('click');
       await settle();
 
       expect(harness.adapter.payloads('zoom')).toEqual([93]);
@@ -90,7 +90,7 @@ describe('כפתורי לשונית „תצוגה”', () => {
       const harness = mountWithPageWidth(A4_WIDTH_IN);
       await settle();
 
-      await buttonByTitle(harness.wrapper, FIT_TITLE).trigger('click');
+      await buttonByTip(harness.wrapper, FIT_TITLE).trigger('click');
       await settle();
 
       expect(harness.adapter.payloads('zoom')).toEqual([186]);
@@ -107,7 +107,7 @@ describe('כפתורי לשונית „תצוגה”', () => {
       const harness = mountWithPageWidth(A4_WIDTH_IN);
       await settle();
 
-      await buttonByTitle(harness.wrapper, FIT_TITLE).trigger('click');
+      await buttonByTip(harness.wrapper, FIT_TITLE).trigger('click');
       await settle();
 
       expect(harness.adapter.payloads('zoom')).toEqual([ZOOM_PERCENT_MAX]);
@@ -120,7 +120,7 @@ describe('כפתורי לשונית „תצוגה”', () => {
     const harness = mountUi(ViewTab, { superdoc: null });
     await settle();
 
-    await buttonByTitle(harness.wrapper, FIT_TITLE).trigger('click');
+    await buttonByTip(harness.wrapper, FIT_TITLE).trigger('click');
     await settle();
 
     expect(harness.adapter.payloads('zoom')).toEqual([]);
@@ -137,7 +137,7 @@ describe('כפתורי לשונית „תצוגה”', () => {
       const harness = mountWithPageWidth(undefined);
       await settle();
 
-      await buttonByTitle(harness.wrapper, FIT_TITLE).trigger('click');
+      await buttonByTip(harness.wrapper, FIT_TITLE).trigger('click');
       await settle();
 
       expect(harness.adapter.payloads('zoom')).toEqual([]);
@@ -153,7 +153,7 @@ describe('כפתורי לשונית „תצוגה”', () => {
     const harness = mountUi(ViewTab);
     await settle();
 
-    await buttonByTitle(harness.wrapper, RULER_TITLE).trigger('click');
+    await buttonByTip(harness.wrapper, RULER_TITLE).trigger('click');
     await settle();
 
     expect(harness.adapter.applied.filter((c) => c.id === 'ruler')).toHaveLength(1);
@@ -163,7 +163,7 @@ describe('כפתורי לשונית „תצוגה”', () => {
     const harness = mountUi(ViewTab);
     await settle();
 
-    await buttonByTitle(harness.wrapper, MARKS_TITLE).trigger('click');
+    await buttonByTip(harness.wrapper, MARKS_TITLE).trigger('click');
     await settle();
 
     expect(harness.adapter.applied.filter((c) => c.id === 'formatting-marks')).toHaveLength(1);
@@ -173,7 +173,7 @@ describe('כפתורי לשונית „תצוגה”', () => {
     const harness = mountUi(ViewTab);
     await settle();
 
-    await buttonByTitle(harness.wrapper, 'מצב קריאה ומיקוד').trigger('click');
+    await buttonByTip(harness.wrapper, 'מצב קריאה ומיקוד').trigger('click');
     await settle();
 
     expect(harness.wrapper.emitted('toggle-focus-mode')).toHaveLength(1);
@@ -189,12 +189,12 @@ describe('כפתורי לשונית „תצוגה”', () => {
     harness.adapter.setState('formatting-marks', { enabled: false });
     await settle();
 
-    expect(buttonByTitle(harness.wrapper, HUNDRED_TITLE).attributes('disabled')).toBeDefined();
-    expect(buttonByTitle(harness.wrapper, FIT_TITLE).attributes('disabled')).toBeDefined();
-    expect(buttonByTitle(harness.wrapper, RULER_TITLE).attributes('disabled')).toBeDefined();
-    expect(buttonByTitle(harness.wrapper, MARKS_TITLE).attributes('disabled')).toBeDefined();
+    expect(buttonByTip(harness.wrapper, HUNDRED_TITLE).attributes('disabled')).toBeDefined();
+    expect(buttonByTip(harness.wrapper, FIT_TITLE).attributes('disabled')).toBeDefined();
+    expect(buttonByTip(harness.wrapper, RULER_TITLE).attributes('disabled')).toBeDefined();
+    expect(buttonByTip(harness.wrapper, MARKS_TITLE).attributes('disabled')).toBeDefined();
 
-    await buttonByTitle(harness.wrapper, HUNDRED_TITLE).trigger('click');
+    await buttonByTip(harness.wrapper, HUNDRED_TITLE).trigger('click');
     await settle();
     expect(harness.adapter.calls).toEqual([]);
   });

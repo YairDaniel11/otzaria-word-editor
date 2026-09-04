@@ -61,6 +61,15 @@ const sheet = readFileSync(STYLE_SHEET, 'utf8');
  */
 const declarations = sheet.replace(/\/\*[\s\S]*?\*\//g, '');
 
+/**
+ * כללי הפאנל בלבד — אלה שהסלקטור שלהם נושא `data-sd-hf-option`. הגיליון
+ * מארח גם עברות ששייכות לחלקים אחרים של chrome המנוע, והספירות כאן מודדות
+ * את הפאנל.
+ */
+const hfRules = declarations
+  .split('}')
+  .filter((rule) => rule.includes('{') && rule.includes('data-sd-hf-option'));
+
 /** כל קובצי הטיפוסים של superdoc — הנתיב הפנימי אינו חוזה, ולכן סורקים. */
 function typeDeclarations(dir = SUPERDOC_TYPES): string {
   let text = '';
@@ -139,12 +148,19 @@ describe('חלוקת העבודה בין הגיליון ל-JS', () => {
       expect(declarations, row).toContain(row);
     }
     // ארבע תוויות, ולכן ארבעה כללי content — ולא שלושה שנראים כמו ארבעה.
-    expect([...declarations.matchAll(/content:/g)]).toHaveLength(HF_OPTION_ROWS.length);
+    // מסונן לכללי הפאנל, מאותה סיבה כמו ספירת ההסתרות שמתחת.
+    const painted = hfRules.filter((rule) => /content:/.test(rule));
+    expect(painted).toHaveLength(HF_OPTION_ROWS.length);
   });
 
   it('הגיליון מסתיר את הטקסט של המנוע ולא מצייר עליו', () => {
     // בלי ההסתרה שתי התוויות יופיעו זו לצד זו — אנגלית ועברית.
-    expect([...declarations.matchAll(/display:\s*none/g)]).toHaveLength(2);
+    //
+    // הספירה מסוננת לכללי הפאנל בלבד: הגיליון מכיל גם הסתרות שאינן שלו
+    // (באנר `edit-rejected`), וספירה על כל הקובץ הייתה הופכת כל כלל חדש
+    // לכשל כאן — כלומר שער שנופל על מה שהוא לא מודד.
+    const hidden = hfRules.filter((rule) => /display:\s*none/.test(rule));
+    expect(hidden).toHaveLength(2);
   });
 
   it('אף עיגון שה-JS מחזיק אינו מתורגם גם בגיליון', () => {

@@ -34,12 +34,25 @@ function setup(over: Partial<ShellActionDeps> = {}) {
     toggleShortcutsHelp: vi.fn(() => true),
     openContextMenu: vi.fn(() => true),
     moveFocusRegion: vi.fn(() => true),
+    newTab: vi.fn(),
+    closeTab: vi.fn(),
+    reopenClosedTab: vi.fn(),
+    stepTab: vi.fn(),
+    goToTab: vi.fn(),
+    openTellMe: vi.fn(),
     ...over,
   };
   return { deps, run: createShellActionRunner(deps) };
 }
 
 describe('createShellActionRunner', () => {
+  it('tell-me קורא ל-openTellMe ומחזיר true', () => {
+    const { deps, run } = setup();
+
+    expect(run('tell-me')).toBe(true);
+    expect(deps.openTellMe).toHaveBeenCalledOnce();
+  });
+
   it('shortcuts-help מחליף את מצב רשימת הקיצורים', () => {
     const { deps, run } = setup();
 
@@ -196,5 +209,65 @@ describe('createShellActionRunner', () => {
 
     // שמירה שרצה חוסמת שמירה בלבד, לא כל פעולה אחרת.
     expect(deps.print).toHaveBeenCalledTimes(1);
+  });
+
+  describe('הטאבים', () => {
+    it('כל פעולת טאב מנותבת למטפל שלה', () => {
+      const { deps, run } = setup();
+
+      expect(run('tab-new')).toBe(true);
+      expect(run('tab-close')).toBe(true);
+      expect(run('tab-reopen')).toBe(true);
+      expect(deps.newTab).toHaveBeenCalledOnce();
+      expect(deps.closeTab).toHaveBeenCalledOnce();
+      expect(deps.reopenClosedTab).toHaveBeenCalledOnce();
+    });
+
+    it('הבא והקודם הם אותה פעולה עם כיוון', () => {
+      const { deps, run } = setup();
+
+      run('tab-next');
+      run('tab-prev');
+
+      expect(deps.stepTab).toHaveBeenNthCalledWith(1, 'next');
+      expect(deps.stepTab).toHaveBeenNthCalledWith(2, 'prev');
+    });
+
+    it('tab-goto מעביר את המיקום שב-payload', () => {
+      const { deps, run } = setup();
+
+      expect(run('tab-goto', 3)).toBe(true);
+      expect(deps.goToTab).toHaveBeenCalledExactlyOnceWith(3);
+    });
+
+    it('tab-goto בלי payload תקין אינו קורא למטפל — אך כן נבלע', () => {
+      // הבליעה היא ההכרעה של הקבוצה כולה (ראו „הטאבים” ב-actions.ts):
+      // `Alt+3` שמשתחרר לדפדפן אינו עושה שם דבר מועיל.
+      const { deps, run } = setup();
+
+      expect(run('tab-goto')).toBe(true);
+      expect(run('tab-goto', 0)).toBe(true);
+      expect(run('tab-goto', '2')).toBe(true);
+      expect(deps.goToTab).not.toHaveBeenCalled();
+    });
+
+    it('tab-goto-last הוא „האחרון” ולא „מספר תשע”', () => {
+      // `Ctrl+9` בדפדפן עובר ללשונית האחרונה, לא לתשיעית. ההבחנה היא בין
+      // פעולה נפרדת לבין `payload: 9`, וזו הסיבה שהיא פעולה.
+      const { deps, run } = setup();
+
+      expect(run('tab-goto-last')).toBe(true);
+      expect(deps.goToTab).toHaveBeenCalledExactlyOnceWith('last');
+    });
+
+    it('קיצור טאב נבלע גם כשהמעטפת לא הזיזה דבר', () => {
+      // טאב יחיד: `stepTab` יוצא מיד. הצירוף עדיין חייב להיבלע — `Ctrl+Tab`
+      // ו-`Ctrl+W` שמשתחררים ל-WebView2 מדלגים בין לשוניות שהמשתמש אינו
+      // רואה, או סוגרים את החלון שהתוסף יושב בו.
+      const { run } = setup({ stepTab: () => {}, closeTab: () => {} });
+
+      expect(run('tab-next')).toBe(true);
+      expect(run('tab-close')).toBe(true);
+    });
   });
 });

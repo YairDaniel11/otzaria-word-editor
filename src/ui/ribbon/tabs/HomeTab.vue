@@ -11,7 +11,7 @@
         :disabled="!canPaste"
         @click="doPaste"
       />
-      <div class="column-items">
+      <RibbonStack>
         <RibbonButton
           icon="cut"
           label="גזור"
@@ -40,7 +40,7 @@
           :disabled="!formatPainterCmd.enabled.value"
           @click="formatPainterCmd.run()"
         />
-      </div>
+      </RibbonStack>
     </RibbonGroup>
 
     <!-- קבוצה 2: גופן -->
@@ -54,21 +54,37 @@
           `:model-value` ולא `v-model`: הערך המוצג הוא computed שמקורו במנוע,
           ואין לפקד רשות לכתוב אליו. מה שהמשתמש בוחר עובר בפקודה, וחוזר משם.
         -->
-        <RibbonSelect
-          :model-value="selectedFontFamily"
-          :options="familySelectOptions"
-          :disabled="!fontFamilyCmd.enabled.value"
+        <!--
+          RibbonCombo ולא RibbonSelect: מרגע שהמכונה נמנית הרשימה מונה מאות
+          שמות, ובבורר נייטיב אין חיפוש. ראו common/RibbonCombo.vue.
+        -->
+        <RibbonCombo
+          :model-value="fonts.family.value"
+          :options="fonts.familyOptions.value"
+          :disabled="!fonts.familyEnabled.value"
+          :sample="fonts.sampleText.value"
           width="130px"
           title="גופן"
-          @update:model-value="onFontFamilyChange"
+          @update:model-value="fonts.setFamily"
+          @preview="fonts.hoverFamily"
+          @preview-end="fonts.endHoverFamily"
         />
-        <RibbonSelect
-          :model-value="selectedFontSize"
-          :options="sizeSelectOptions"
-          :disabled="!fontSizeCmd.enabled.value"
-          width="50px"
+        <!--
+          גם הגודל הוא RibbonCombo, ולא `<select>` שהיה כאן: בסולם של Word יש
+          ארבעה עשר גדלים, והמסמכים שנערכים כאן משתמשים גם ב-13, ב-15 וב-10.5.
+          בבורר סגור הם היו נגישים רק דרך „הגדל/הקטן” — כלומר לא נגישים.
+          `normalize` הוא מה שהופך את התיבה לתיבת ערך: ראו common/RibbonCombo.vue.
+        -->
+        <RibbonCombo
+          :model-value="fonts.size.value"
+          :options="fonts.sizeOptions.value"
+          :disabled="!fonts.sizeEnabled.value"
+          :normalize="fonts.normalizeSize"
+          empty-text="Enter מחיל את הגודל שהוקלד"
+          list-min-width="52px"
+          width="54px"
           title="גודל גופן"
-          @update:model-value="onFontSizeChange"
+          @update:model-value="fonts.setSize"
         />
         <RibbonButton
           icon="growFont"
@@ -76,8 +92,8 @@
           tooltip="הגדל גופן"
           description="מגדיל את הטקסט המסומן בדרגה אחת בכל לחיצה"
           shortcut-id="font-grow"
-          :disabled="!fontSizeCmd.enabled.value"
-          @click="growFontSize"
+          :disabled="!fonts.sizeEnabled.value"
+          @click="fonts.grow"
         />
         <RibbonButton
           icon="shrinkFont"
@@ -85,8 +101,8 @@
           tooltip="הקטן גופן"
           description="מקטין את הטקסט המסומן בדרגה אחת בכל לחיצה"
           shortcut-id="font-shrink"
-          :disabled="!fontSizeCmd.enabled.value"
-          @click="shrinkFontSize"
+          :disabled="!fonts.sizeEnabled.value"
+          @click="fonts.shrink"
         />
         <RibbonButton
           icon="clearFormatting"
@@ -107,7 +123,6 @@
         <RibbonButton
           label="מתקדם"
           variant="small"
-          tooltip="גופן מתקדם: ריווח תווים, מיקום, אפקטים וגופן מורכב"
           description="ריווח תווים, מיקום ביחס לשורה, אפקטים וגופן מורכב"
           :disabled="fontAdvInFlight"
           @click="onOpenFontAdvanced"
@@ -203,23 +218,43 @@
     >
       <!-- שורה עליונה: תבליטים, מספור, הזחה, כיווניות, סימני עיצוב -->
       <div class="word-group-row">
-        <RibbonButton
+        <!--
+          „תבליטים” ו„מספור” הם כפתורים מפוצלים: הגוף מחיל את הרשימה, והחץ
+          פותח את פעולות הרשימה. עד עכשיו הן ישבו בכפתור „רשימה” נפרד לצדם —
+          שלושה פקדים לדבר אחד, ומי שרצה מספור עברי היה צריך לדעת שהוא מסתתר
+          מאחורי כפתור שאינו הכפתור שיצר את הרשימה.
+        -->
+        <RibbonMenuButton
+          split
           icon="bulletList"
+          label="תבליטים"
           variant="icon-only"
           tooltip="תבליטים"
           description="הופך את הפסקאות המסומנות לרשימה מסומנת בנקודות"
+          menu-tooltip="פעולות תבליטים"
+          :menu-description="bulletMenuHint"
           :active="bulletCmd.active.value"
-          :disabled="!bulletCmd.enabled.value"
-          @click="bulletCmd.run()"
+          :action-disabled="!bulletCmd.enabled.value"
+          :disabled="!listsAvailable"
+          :items="bulletMenuItems"
+          @action="bulletCmd.run()"
+          @select="onListMenuSelect"
         />
-        <RibbonButton
+        <RibbonMenuButton
+          split
           icon="numberList"
+          label="מספור"
           variant="icon-only"
           tooltip="מספור"
           description="הופך את הפסקאות המסומנות לרשימה ממוספרת"
+          menu-tooltip="פעולות מספור"
+          :menu-description="numberMenuHint"
           :active="numberedCmd.active.value"
-          :disabled="!numberedCmd.enabled.value"
-          @click="numberedCmd.run()"
+          :action-disabled="!numberedCmd.enabled.value"
+          :disabled="!listsAvailable"
+          :items="numberMenuItems"
+          @action="numberedCmd.run()"
+          @select="onListMenuSelect"
         />
         <RibbonButton
           icon="indentDecrease"
@@ -238,20 +273,6 @@
           shortcut-id="indent-increase"
           :disabled="!indentIncCmd.enabled.value"
           @click="indentIncCmd.run()"
-        />
-
-        <!--
-          „רשימה" (גל 14א) — פעולות שאין להן פקודה ברצועה: מספור עברי
-          (hebrew1 — נמדד שנכתב ל-numbering.xml), התחלה מחדש, המשך מספור
-          קודם והמרה לטקסט. „המר לטקסט" בלתי-הפיך ולכן דורש לחיצה שנייה.
-        -->
-        <RibbonMenuButton
-          icon="numberList"
-          label="רשימה"
-          :tooltip="listsTooltip"
-          :disabled="!listsAvailable"
-          :items="listMenuItems"
-          @select="onListMenuSelect"
         />
 
         <div class="word-separator" />
@@ -378,7 +399,7 @@
 
     <!-- קבוצה 5: עריכה -->
     <RibbonGroup title="עריכה">
-      <div class="column-items">
+      <RibbonStack>
         <RibbonButton
           icon="search"
           label="חפש"
@@ -410,7 +431,7 @@
           :disabled="!canSelectAll"
           @click="doSelectAll"
         />
-      </div>
+      </RibbonStack>
     </RibbonGroup>
 
     <ParagraphDialog
@@ -435,16 +456,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onUnmounted, ref, shallowRef, watch, type Ref } from 'vue';
+import { computed, inject, onUnmounted, ref, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
+import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import RibbonMenuButton from '../common/RibbonMenuButton.vue';
 import RibbonSelect, { type SelectOption } from '../common/RibbonSelect.vue';
+import RibbonCombo from '../common/RibbonCombo.vue';
 import ColorPickerPopover from '../common/ColorPickerPopover.vue';
 import StyleGallery from '../common/StyleGallery.vue';
 import { useCommand } from '../../../composables/useCommand';
-import { useFontOptions } from '../../../composables/useFontOptions';
+import { useFontControls } from '../../../composables/use-font-controls';
+import { applyOptimistically, withCurrent } from '../../../composables/picker-value';
 import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
 import type { CommandOutcome } from '../../../engine/command-adapter';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
@@ -487,21 +511,15 @@ import {
   convertListToText,
   restartListAt,
   setListNumberStyle,
+  setListToBullets,
 } from '../../../engine/lists';
 import {
-  DEFAULT_FONT_SIZE_PT,
   DEFAULT_LINE_HEIGHT,
   alignmentPayload,
   colorPayload,
-  fontFamilyPayload,
-  fontSizePayload,
-  grownFontSize,
   lineHeightPayload,
   parseColor,
-  parseFontFamily,
-  parseFontSizePt,
   parseLineHeight,
-  shrunkFontSize,
   stylePayload,
   type ParagraphAlignment,
 } from '../../../engine/payloads';
@@ -520,12 +538,6 @@ const SPACING_OPTIONS: SelectOption[] = [
   { value: '3.0', label: '3.0' },
 ];
 
-/**
- * מה שהבורר מציג לפני שהמנוע דיווח על גופן. Assistant הוא הגופן הארוז, כלומר
- * היחיד שבטוח קיים בכל פלטפורמה.
- */
-const DEFAULT_FONT_FAMILY = 'Assistant';
-
 // פקודות SuperDoc
 const boldCmd = useCommand('bold');
 const italicCmd = useCommand('italic');
@@ -534,8 +546,6 @@ const strikeCmd = useCommand('strikethrough');
 const clearFormatCmd = useCommand('clear-formatting');
 const formatPainterCmd = useCommand('copy-format');
 
-const fontFamilyCmd = useCommand('font-family');
-const fontSizeCmd = useCommand('font-size');
 const fontColorCmd = useCommand('text-color');
 const highlightCmd = useCommand('highlight-color');
 
@@ -551,22 +561,23 @@ const lineSpacingCmd = useCommand('line-height');
 const styleCmd = useCommand('linked-style');
 
 /**
- * אפשרויות הגופן מהמנוע (`ui.fonts`), ממוזגות עם שלנו. ראו
- * engine/font-options.ts — הרשימה הקשיחה שהייתה כאן לא ידעה מה יש במסמך.
+ * בורר הגופן ובורר הגודל. המצב שלהם אינו כאן אלא ב-use-font-controls.ts, ומאותו
+ * טעם שבו האפשרויות אינן כאן: אותם שני בוררים מופיעים גם בתפריט הלחצן הימני,
+ * ועותק פרטי לכל אחד מהם היה מציג בהם ערכים שונים באותו רגע — בדיוק ברגע שבו
+ * המנוע אינו מדווח ערך.
  */
-const { families: fontFamilyOptions, sizes: fontSizeOptions } = useFontOptions();
+const fonts = useFontControls();
 
 /* ------------------------------------------------------------------ */
 /* מה שהמנוע מדווח על הבחירה                                            */
 /* ------------------------------------------------------------------ */
 
 /**
- * `CommandState.value` הוא המקור לערך שהבורר מציג — לא ref מקומי. עד עכשיו
- * שלושת הבוררים היו refs שאותחלו לערך קשיח ולעולם לא התעדכנו: לחיצה על טקסט
- * ב-20pt השאירה „12” בתיבה, ו-`growFontSize` חישב מהמספר השגוי הזה.
+ * `CommandState.value` הוא המקור לערך שהפקד מציג — לא ref מקומי. שלושת
+ * הבוררים היו פעם refs שאותחלו לערך קשיח ולעולם לא התעדכנו: לחיצה על טקסט
+ * ב-20pt השאירה „12” בתיבה. בורר הגופן והגודל עברו ל-use-font-controls.ts;
+ * מה שנשאר כאן הוא מרווח השורות ושני הצבעים.
  */
-const engineFamily = computed(() => parseFontFamily(fontFamilyCmd.value.value));
-const engineSize = computed(() => parseFontSizePt(fontSizeCmd.value.value));
 const engineLineHeight = computed(() => parseLineHeight(lineSpacingCmd.value.value));
 const engineTextColor = computed(() => parseColor(fontColorCmd.value.value));
 const engineHighlight = computed(() => parseColor(highlightCmd.value.value));
@@ -578,8 +589,6 @@ const engineHighlight = computed(() => parseColor(highlightCmd.value.value));
  * עם יותר מערך אחד, ורגע שבו הוא עוד לא פתר את הבחירה. הבורר הוא **פקד**, ולא
  * דוח; לרוקן אותו בכל תנועת סמן היה גרוע יותר מלהציג את הערך האחרון שכן ידענו.
  */
-const lastFamily = ref(DEFAULT_FONT_FAMILY);
-const lastSize = ref(DEFAULT_FONT_SIZE_PT);
 const lastLineHeight = ref(DEFAULT_LINE_HEIGHT);
 
 /**
@@ -588,8 +597,8 @@ const lastLineHeight = ref(DEFAULT_LINE_HEIGHT);
  * למה שכבה נפרדת ולא כתיבה לזיכרון שלמעלה, וזה **הבאג שהיה כאן**: הזיכרון
  * נכתב לפני `run()` ולא הוחזר בכשל, ולכן הבורר הציג גופן שלא הוחל על שום דבר —
  * אותה תקלה בדיוק שתוקנה בזום, שבה הסרגל הזיז את התווית ורוחב העמוד לא זז.
- * מסוכן ממנה היה „הגדל גופן”, שמחשב מהערך הזה: שלוש לחיצות על מסמך שדוחה שלחו
- * 14, 16, 18 — הפקד התרחק מהמסמך בכל לחיצה.
+ * מסוכן ממנה היה „הגדל גופן” (שעבר מכאן ל-use-font-controls.ts), שמחשב מהערך
+ * הזה: שלוש לחיצות על מסמך שדוחה שלחו 14, 16, 18 — הפקד התרחק מהמסמך בכל לחיצה.
  *
  * ההפרדה גם מה שמתקן את המקרה הקשה יותר, שבו למנוע **יש** ערך: כתיבה לזיכרון
  * לא שינתה שם את הערך המוצג בכלל (המנוע גובר עליו), ולכן לא היה רינדור חוזר —
@@ -597,16 +606,8 @@ const lastLineHeight = ref(DEFAULT_LINE_HEIGHT);
  * נשארה על המסך עד לרינדור חוזר מסיבה אחרת לגמרי. עם שכבת ה-`pending` הערך
  * המוצג משתנה בשני הכיוונים, והסנכרון נקשר לתשובה עצמה.
  */
-const pendingFamily = ref<string | null>(null);
-const pendingSize = ref<number | null>(null);
 const pendingLineHeight = ref<number | null>(null);
 
-watch(engineFamily, (value) => {
-  if (value) lastFamily.value = value;
-});
-watch(engineSize, (value) => {
-  if (value) lastSize.value = value;
-});
 watch(engineLineHeight, (value) => {
   if (value) lastLineHeight.value = value;
 });
@@ -615,16 +616,9 @@ watch(engineLineHeight, (value) => {
  * סדר העדיפויות: מה שנבחר וטרם נענה, אחר כך מה שהמנוע מדווח, ולבסוף האחרון
  * שידענו. בקשה שנדחתה נעלמת מהשכבה הראשונה, ואז המסמך חוזר להיות מה שמוצג.
  */
-const selectedFontFamily = computed(
-  () => pendingFamily.value ?? engineFamily.value ?? lastFamily.value,
-);
-const currentSize = computed(() => pendingSize.value ?? engineSize.value ?? lastSize.value);
 const currentLineHeight = computed(
   () => pendingLineHeight.value ?? engineLineHeight.value ?? lastLineHeight.value,
 );
-
-/** „12” ולא „12.0”, אבל „20.5” נשמר — המנוע מדווח חצאי נקודות. */
-const selectedFontSize = computed(() => String(currentSize.value));
 
 /** „1.5” ולא „1.50”, כדי שהערך יתאים לאפשרות בבורר. */
 const selectedLineSpacing = computed(() => currentLineHeight.value.toFixed(2).replace(/0$/, ''));
@@ -632,37 +626,6 @@ const selectedLineSpacing = computed(() => currentLineHeight.value.toFixed(2).re
 /** צבע הפקד תמיד משקף את המסמך; ברירת המחדל היא מה שהכפתור יחיל בלחיצה. */
 const textColor = computed(() => engineTextColor.value ?? '');
 const highlightColor = computed(() => engineHighlight.value ?? '');
-
-/**
- * הערך הנוכחי חייב להיות אחת האפשרויות, אחרת `<select>` מציג את הראשונה
- * ומשקר. גופן או גודל שאינם ברשימה (מסמך שנכתב בגופן שהמנוע לא הציע, טקסט
- * ב-20.5pt) מתווספים בראשה — בדיוק מה ש-Word עושה.
- */
-function withCurrent(
-  options: readonly SelectOption[],
-  current: string,
-): readonly SelectOption[] {
-  if (current === '' || options.some((option) => option.value === current)) return options;
-  return [{ value: current, label: current, preview: current }, ...options];
-}
-
-const familySelectOptions = computed(() =>
-  withCurrent(
-    fontFamilyOptions.value.map((option) => ({
-      value: option.value,
-      label: option.label,
-      preview: option.previewFamily,
-    })),
-    selectedFontFamily.value,
-  ),
-);
-
-const sizeSelectOptions = computed(() =>
-  withCurrent(
-    fontSizeOptions.value.map((option) => ({ value: option.value, label: option.label })),
-    selectedFontSize.value,
-  ),
-);
 
 const spacingSelectOptions = computed(() =>
   withCurrent(SPACING_OPTIONS, selectedLineSpacing.value),
@@ -675,57 +638,6 @@ const spacingSelectOptions = computed(() =>
 // כל ה-payloads נבנים ב-engine/payloads.ts, ולא כליטרל כאן: מה שנשלח לפקודה
 // הוא חוזה מול ולידטור בתוך המנוע, והוולידטור נכשל **סגור**. ראו את הטבלה
 // שם, ואת בדיקת החוזה ב-tests/contract/command-payloads.test.ts.
-/**
- * שולחת את הבחירה ומחזיקה אותה על המסך עד לתשובה: בהצלחה היא נשמרת כ„אחרון
- * שידענו”, ובכשל היא נעלמת — כלומר מה שלא קרה במסמך אינו מוצג.
- *
- * למה אופטימי ולא „להמתין לתשובה”: הבורר חייב להגיב מיד, והמנוע אינו מדווח
- * ערך בכלל על בחירה מעורבת — תיבה שממתינה לו הייתה נראית קפואה גם בהצלחה
- * מלאה.
- *
- * הבדיקה `pending.value !== next` לפני העדכון: אם המשתמש בחר שוב בזמן
- * ההמתנה, הבקשה שבאוויר אינה שלנו יותר, ותשובה מאוחרת אינה אמורה למחוק בחירה
- * טרייה.
- */
-async function applyOptimistically<T>(
-  pending: Ref<T | null>,
-  memo: Ref<T>,
-  next: T,
-  run: () => Promise<CommandOutcome>,
-): Promise<void> {
-  pending.value = next;
-  const outcome = await run();
-  if (pending.value !== next) return;
-  if (outcome.ok) memo.value = next;
-  pending.value = null;
-}
-
-function onFontFamilyChange(font: string): void {
-  const payload = fontFamilyPayload(font);
-  if (payload === null) return;
-  void applyOptimistically(pendingFamily, lastFamily, payload, () => fontFamilyCmd.run(payload));
-}
-
-function applyFontSize(pt: number): void {
-  const payload = fontSizePayload(pt);
-  if (payload === null) return;
-  void applyOptimistically(pendingSize, lastSize, payload, () => fontSizeCmd.run(payload));
-}
-
-function onFontSizeChange(size: string): void {
-  const pt = parseFontSizePt(size);
-  if (pt !== null) applyFontSize(pt);
-}
-
-/** הגדל/הקטן עובדים על **הערך מהמנוע**, על סולם הגדלים של Word. */
-function growFontSize(): void {
-  applyFontSize(grownFontSize(currentSize.value));
-}
-
-function shrinkFontSize(): void {
-  applyFontSize(shrunkFontSize(currentSize.value));
-}
-
 function onTextColorChange(color: string | null): void {
   void fontColorCmd.run(colorPayload(color));
 }
@@ -768,6 +680,7 @@ const fallbackReporter: CommandReporter = (outcome, id) => {
 };
 
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
+
 const report = inject(COMMAND_REPORTER, fallbackReporter);
 
 /* ------------------------------------------------------------------ */
@@ -1196,20 +1109,66 @@ const convertArmed = shallowRef(false);
 
 const listsAvailable = computed(() => capabilities.value?.can('canManageLists') ?? false);
 
-const listMenuItems = computed(() => [
-  ...Object.entries(NUMBER_STYLE_LABELS).map(([id, label]) => ({ id: `style:${id}`, label })),
+/**
+ * סדר סגנונות המספור בתפריט — עברי ראשון.
+ *
+ * `NUMBER_STYLE_LABELS` הוא מפה, וסדר ההכנסה שלה הוא סדר ה-`numFmt` של
+ * ECMA-376: `decimal` בראש ו-`hebrew1` שישי. זה הסדר הנכון למי שקורא את
+ * התקן, ולא למי שכותב כאן מסמך — ולכן הסדר לתצוגה נכתב במפורש, ואינו נגזר
+ * מסדר המפה. `bullet` אינו כאן: הוא התפריט של „תבליטים”, לא של „מספור”.
+ */
+const NUMBER_STYLE_ORDER = [
+  'hebrew1',
+  'hebrew2',
+  'decimal',
+  'upperLetter',
+  'lowerLetter',
+  'upperRoman',
+  'lowerRoman',
+] as const;
+
+/** „המר לטקסט” — אותו פריט בשני התפריטים, כולל מצב החימוש. */
+const convertItem = computed(() => ({
+  id: 'convert',
+  label: convertArmed.value ? 'לחץ שוב לאישור — הפעולה בלתי-הפיכה' : 'המר לטקסט…',
+}));
+
+const numberMenuItems = computed(() => [
+  ...NUMBER_STYLE_ORDER.map((id) => ({ id: `style:${id}`, label: NUMBER_STYLE_LABELS[id] })),
   { id: 'restart', label: 'התחל מחדש מ-1' },
   { id: 'continue', label: 'המשך מספור קודם' },
-  {
-    id: 'convert',
-    label: convertArmed.value ? 'לחץ שוב לאישור — הפעולה בלתי-הפיכה' : 'המר לטקסט…',
-  },
+  convertItem.value,
 ]);
 
-const listsTooltip = computed(() => {
-  if (!listsAvailable.value) return capabilities.value?.explain('canManageLists') || 'המסמך עדיין נטען';
-  return 'פעולות רשימה: סגנון מספור (כולל עברי), התחלה מחדש והמרה לטקסט';
-});
+/**
+ * התפריט של „תבליטים”. `to-bullets` אינו כפילות של הכפתור שמעליו: הכפתור
+ * מחיל רשימה על פסקאות, וזה מחליף את סגנון הסמן של רשימה **קיימת** — כלומר
+ * הדרך להפוך רשימה ממוספרת לתבליטים בלי לפרק אותה ולבנות מחדש. לכן הוא אינו
+ * מקבל `createList` ב-`onListMenuSelect`, בשונה מסגנוני המספור: על פסקה רגילה
+ * הוא מסרב ואינו נוגע במסמך.
+ */
+const bulletMenuItems = computed(() => [
+  { id: 'to-bullets', label: 'הפוך רשימה ממוספרת לתבליטים' },
+  convertItem.value,
+]);
+
+/**
+ * שורת ההסבר בטולטיפ של חץ התפריט — מה יש בו, ובמצב מנוטרל למה אין. השם
+ * עצמו („פעולות תבליטים” / „פעולות מספור”) קבוע ואינו מתחלף בין המצבים: הוא
+ * גם השם הנגיש של החץ, וגם הידית שבה שערי ה-QA מאתרים אותו.
+ */
+function listsMenuHint(available: string): string {
+  if (listsAvailable.value) return available;
+  return capabilities.value?.explain('canManageLists') || 'המסמך עדיין נטען';
+}
+
+const bulletMenuHint = computed(() =>
+  listsMenuHint('החלפת רשימה ממוספרת לתבליטים, והמרה לטקסט'),
+);
+
+const numberMenuHint = computed(() =>
+  listsMenuHint('סגנון מספור (כולל עברי), התחלה מחדש והמרה לטקסט'),
+);
 
 async function runList(action: () => Promise<CommandOutcome>): Promise<void> {
   if (listsInFlight.value) return;
@@ -1222,9 +1181,20 @@ async function runList(action: () => Promise<CommandOutcome>): Promise<void> {
 }
 
 function onListMenuSelect(id: string): void {
+  // כל פעולה שאינה „המר לטקסט” מנטרלת את החימוש שלו: המשתמש עשה משהו אחר
+  // בינתיים, ולחיצה הבאה על „המר” חייבת להיות שוב לחיצה ראשונה.
+  if (id !== 'convert') convertArmed.value = false;
+
   if (id.startsWith('style:')) {
     const style = id.slice('style:'.length);
-    void runList(() => setListNumberStyle(superdoc.value, style));
+    // סגנון מספור על פסקה שאינה רשימה ממספר אותה קודם (issue #14 ג׳). ראו
+    // `SetNumberStyleOptions.createList` ב-engine/lists.ts.
+    void runList(() => setListNumberStyle(superdoc.value, style, { createList: numberedCmd.run }));
+    return;
+  }
+
+  if (id === 'to-bullets') {
+    void runList(() => setListToBullets(superdoc.value));
     return;
   }
 
@@ -1240,7 +1210,8 @@ function onListMenuSelect(id: string): void {
 
   if (id === 'convert') {
     // אישור דו-לחיצה: הפעולה בלתי-הפיכה (נמדד). לחיצה ראשונה חומשת,
-    // שנייה מבצעת; מעבר בין פתיחות התפריט מנטרל את החימוש.
+    // שנייה מבצעת. כל בחירה אחרת בדרך מנטרלת (ראו למעלה) — אחרת „המר
+    // לטקסט” היה נשאר חמוש בשני התפריטים עד סוף החיים של הלשונית.
     if (!convertArmed.value) {
       convertArmed.value = true;
       return;
@@ -1258,13 +1229,5 @@ function onListMenuSelect(id: string): void {
   gap: 0;
   height: 100%;
   width: 100%;
-}
-
-.column-items {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  justify-content: center;
-  flex-shrink: 0;
 }
 </style>

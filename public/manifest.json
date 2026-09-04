@@ -15,10 +15,24 @@
     "fs.user_files.read",
     "fs.user_files.write",
     "reader.open",
+    "reader.context_menu",
+    "app.startup_contributions",
     "navigation.write",
-    "clipboard.read"
+    "clipboard.read",
+    "library.refresh"
   ],
   "contributes": {
+    "startup": {
+      "contextMenuItems": [
+        {
+          "id": "otzaria-word-send-to-document",
+          "title": "שלח למסמך",
+          "icon": "document_text_24_regular",
+          "contexts": ["reader-selection", "reader-page-shape-selection"],
+          "openPlugin": true
+        }
+      ]
+    },
     "toolTab": {
       "title": "וורד לאוצריא",
       "order": 100,

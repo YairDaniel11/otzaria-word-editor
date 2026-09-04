@@ -9,6 +9,12 @@ SuperDoc, גם בלי הקשר מהגלים הקודמים. אין צורך לק
 וביבליוגרפיה, כיתובים, ניהול הערות שוליים, ופריסת עמוד מתקדמת. טבלת מקורות
 נבדקה ו**נדחתה** במודע. לשוניות „הוספה” ו„הפניות” הושלמו.
 
+**ומאז נסגרו עוד, ופרק ה׳ למטה עדיין מציג אותם כעתידיים.** לפי המודולים
+שבעץ: גל 11 (`paragraph-format.ts`), 12 (`font-advanced.ts`),
+14 (`lists.ts`), 19 (`protection.ts`), 22 (`hyperlinks-manage.ts`).
+גל 24 נסגר חלקית — ראו ההערה שם. לפני שמתחילים גל מפרק ה׳, כדאי לבדוק אם
+המודול שלו כבר קיים ב-`src/engine/`.
+
 **מסמך שחייבים לקרוא לפני שכותבים שורה:**
 **[`engine-gaps.md`](engine-gaps.md)** — כל מה שנמדד במנוע בעשרה גלים. **אל
 תמדוד מחדש מה שכתוב שם.** זהו המסמך החשוב ביותר במאגר לעבודה הזאת. הגל
@@ -269,10 +275,14 @@ const FIND = `(function(){
 ### 5. שערים
 
 `npm run verify` = typecheck + vitest + build + `check:dist` + `check:boot` +
-`check:fonts` + `check:rtl` + `check:sdk`. **חייב לעבור.**
+`check:fonts` + `check:icons` + `check:rtl` + `check:sdk`. **חייב לעבור.**
 
 שתי אזהרות ידועות שאינן שלך ואין לתקן: `check:dist` על
 `cdnjs.cloudflare.com`, ו-`check:sdk` שמדלג כי ה-SDK אינו במכונה.
+
+`check:icons` מוריד את `@fluentui/svg-icons@1.1.338` מ-npm בכל הרצה (כ-35 שניות)
+ומדלג כשאין רשת. הוא נכשל כשאייקון חדש אינו נרשם ב-THIRD_PARTY_NOTICES.md — לא
+בטבלה ולא ברשימת החריגים — ולכן **אייקון חדש הוא גם שורה במסמך הרישוי**.
 
 שים לב: `tests/component/ribbon-tabs.test.ts` מחזיק `EXPECTED_DISABLED` —
 „רק הפקדים שאין להם API נשארים מנוטרלים”. פקד שמנוטרל מסיבת **מצב** דורש
@@ -637,9 +647,12 @@ updatePrincipal`.
 
 **הפעולות:** `plan.execute`, `mutations.preview`, `mutations.apply`.
 
-**מה מתווסף.** אין VBA ולא יהיה — אין ב-SuperDoc שום `vbaProject` ולא
-`.docm`. אבל `doc.plan.execute({entries, captureReturns})` הוא מנוע מאקרו
-הצהרתי אמיתי:
+**מה מתווסף.** *(עודכן: החלק הראשון כאן כבר אינו נכון. `.docm` נפתח,
+נערך ונשמר עם `vbaProject` שלם, וקוד ה-VBA שבמסמך מוצג לקריאה —
+`src/engine/vba-import.ts`, `src/engine/export.ts`, ולשונית „VBA במסמך”
+בדיאלוג המאקרו. מה שנכון: **המאקרו אינם מורצים** — אין מנוע VBA בדפדפן.)*
+
+`doc.plan.execute({entries, captureReturns})` הוא מנוע מאקרו הצהרתי אמיתי:
 
 ```js
 doc.plan.execute({

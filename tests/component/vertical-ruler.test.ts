@@ -9,7 +9,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import VerticalRuler from '../../src/ui/shell/VerticalRuler.vue';
 import type { RulerReading } from '../../src/engine/page-ruler';
-import { autoUnmount, mountUi, settle } from './harness';
+import { autoUnmount, mountUi, settle, tipMessage } from './harness';
 
 autoUnmount();
 
@@ -340,7 +340,7 @@ describe('רצפת הכותרת', () => {
     });
 
     const handle = handleByLabel(harness.wrapper, 'שוליים עליונים')!;
-    expect(handle.attributes('title')).toContain('הכותרת העליונה אינה מאפשרת פחות');
+    expect(tipMessage(handle)).toContain('הכותרת העליונה אינה מאפשרת פחות');
     expect(handle.attributes('aria-valuemin')).toBe('1.76');
   });
 
@@ -349,7 +349,7 @@ describe('רצפת הכותרת', () => {
     const handle = handleByLabel(harness.wrapper, 'שוליים עליונים')!;
 
     expect(handle.attributes('aria-valuemin')).toBe('0');
-    expect(handle.attributes('title')).not.toContain('אינה מאפשרת');
+    expect(tipMessage(handle)).not.toContain('אינה מאפשרת');
 
     handle.element.dispatchEvent(pointer('pointerdown', 0, { button: 0 }));
     await settle();

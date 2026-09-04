@@ -49,12 +49,17 @@ import {
   COMMAND_ADAPTER,
   COMMAND_REPORTER,
   DOCUMENT_GENERATION,
+  FONT_MEMORY,
   FONT_OPTIONS,
   READOUT_SELECTION,
+  SPELLCHECK,
   STYLE_GALLERY,
+  type SpellcheckHandle,
 } from '../../src/composables/keys';
+import { createFontMemory, type FontMemory } from '../../src/composables/use-font-controls';
 import { ACTIVE_SUPERDOC } from '../../src/engine/document-api';
 import { ACTIVE_MACROS, type MacrosHandle } from '../../src/engine/macros';
+import { readTip, type TipContent } from '../../src/ui/tooltip/tooltip-content';
 import { fallbackFontOptions, type FontOptions } from '../../src/engine/font-options';
 import { fallbackStyleGallery, type StyleGalleryState } from '../../src/engine/style-gallery';
 import type { ReadoutSelection } from '../../src/engine/readout-hold';
@@ -1062,6 +1067,7 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
       setLevelNumberStyle: route('lists.setLevelNumberStyle', () =>
         receipt('lists.setLevelNumberStyle'),
       ),
+      applyStyle: route('lists.applyStyle', () => receipt('lists.applyStyle')),
       restartAt: route('lists.restartAt', () => receipt('lists.restartAt')),
       continuePrevious: route('lists.continuePrevious', () => receipt('lists.continuePrevious')),
       convertToText: route('lists.convertToText', () => receipt('lists.convertToText')),
@@ -1201,6 +1207,12 @@ export interface HarnessOptions {
   /** ברירת המחדל: כפיל מופע עם כל היכולות. `null` = אין מסמך פתוח. */
   superdoc?: SuperdocDouble | null;
   fontOptions?: FontOptions;
+  /**
+   * הזיכרון של בוררי הגופן. ברירת המחדל היא זיכרון חדש לכל הרכבה — כמו
+   * ברירת המחדל של ה-inject עצמו. בדיקה שמוסרת **אותו** זיכרון לשתי הרכבות
+   * מודדת בדיוק את מה שהמעטפת עושה: רצועה ותפריט הקשר שחולקים מצב.
+   */
+  fontMemory?: FontMemory;
   styleGallery?: StyleGalleryState;
   /**
    * מצב הבחירה שהחזקת החיווי נשענת עליו. ברירת המחדל היא סמן שהתיישב —
@@ -1251,6 +1263,7 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
     reports.push({ outcome, commandId });
   };
   provide[FONT_OPTIONS as unknown as symbol] = ref(options.fontOptions ?? fallbackFontOptions());
+  provide[FONT_MEMORY as unknown as symbol] = options.fontMemory ?? createFontMemory();
   provide[STYLE_GALLERY as unknown as symbol] = shallowRef(
     options.styleGallery ?? fallbackStyleGallery(),
   );
@@ -1278,6 +1291,21 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
   provide[READOUT_SELECTION as unknown as symbol] = readoutSelectionRef;
   const documentGenerationRef = shallowRef((documentGenerationCounter += 1));
   provide[DOCUMENT_GENERATION as unknown as symbol] = documentGenerationRef;
+
+  /**
+   * מתג בדיקת האיות. כפיל **מתפקד** ולא no-op: `toggle` מהפך את `enabled`
+   * בדיוק כמו המעטפת, וזה מה שמאפשר לשער „אין כפתור מת” (ribbon-tabs) למדוד
+   * את הכפתור הזה — לחיצה שאינה משנה דבר בכפיל הייתה נראית שם כפקד שבור.
+   * המילון עצמו אינו נטען כאן: זו הרכבת רכיב, ואין בה DOM של מסמך לסמן.
+   */
+  const spellcheckEnabled = ref(false);
+  provide[SPELLCHECK as unknown as symbol] = {
+    enabled: spellcheckEnabled,
+    busy: ref(false),
+    toggle: () => {
+      spellcheckEnabled.value = !spellcheckEnabled.value;
+    },
+  } satisfies SpellcheckHandle;
 
   const wrapper = mount(component, {
     props: options.props,
@@ -1318,24 +1346,129 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
  * מאשר בירוק בדיוק את מה שהוא נבנה לתפוס.
  */
 /**
- * כפתור לפי **תחילת** ה-title. הצירוף בסוגריים („מודגש (Ctrl+B)”) הוא תווית
- * שמתווספת ונגרעת עם הרג'יסטרי של הקיצורים, ולכן הוא אינו מזהה: בדיקה שנעולה
- * עליו נשברת בכל שינוי בקיצור, גם כשהפקד עצמו לא זז.
+ * כפתור לפי הטקסט שהטולטיפ שלו מתחיל בו.
+ *
+ * ## למה שני שדות ולא אחד
+ *
+ * אותו prop `tooltip` נוחת בשדה אחר לפי הפקד: בכפתור אייקון הוא ה**כותרת**
+ * („מודגש”), ובכפתור שיש לו תווית גלויה הוא יורד ל**הסבר** („העתק עיצוב ממקום
+ * אחד…”, „הפעולה אינה זמינה בגרסה הזאת של המנוע”) והכותרת נשארת התווית. זה
+ * הכלל של `tipParts`, והוא נכון — אבל הוא אומר שבדיקה שמחפשת „הפקד שהטולטיפ
+ * שלו אומר X” חייבת להסתכל בשניהם. אחרת כל שינוי של `label` בפקד היה מפיל
+ * בדיקות שאינן נוגעות בו.
+ *
+ * ## למה תחילת המחרוזת
+ *
+ * זכר לתקופה שבה ה-`title` נשא גם את הצירוף בסוגריים. היום `data-tip-shortcut`
+ * נפרד, אבל ההתאמה לפי תחילית עדיין מונעת נעילה על סופי מחרוזות שנוטים לזוז.
+ *
+ * ## ולמה לא `title`
+ *
+ * התכונה הזאת אינה קיימת עוד באף אלמנט בתוכנה — היא מה שצייר טולטיפ שני, אפור,
+ * מעל הכרטיס המעוצב. ראו tests/unit/native-title.test.ts.
  */
-export function findButtonByTitle(
+export function findButtonByTip(
   wrapper: VueWrapper,
-  titlePrefix: string,
+  tipPrefix: string,
 ): DOMWrapper<Element> | undefined {
-  return wrapper
-    .findAll('button')
-    .find((button) => (button.attributes('title') ?? '').startsWith(titlePrefix));
+  return wrapper.findAll('button').find((button) => {
+    const attributes = button.attributes();
+    return (
+      (attributes['data-tip-title'] ?? '').startsWith(tipPrefix) ||
+      (attributes['data-tip-desc'] ?? '').startsWith(tipPrefix)
+    );
+  });
 }
 
-/** כמו `findButtonByTitle`, ונופלת עם שם הכפתור כשאין כזה. */
-export function buttonByTitle(wrapper: VueWrapper, titlePrefix: string): DOMWrapper<Element> {
-  const button = findButtonByTitle(wrapper, titlePrefix);
-  if (!button) throw new Error(`אין כפתור שה-title שלו מתחיל ב"${titlePrefix}"`);
+/** כמו `findButtonByTip`, ונופלת עם שם הכפתור כשאין כזה. */
+export function buttonByTip(wrapper: VueWrapper, tipPrefix: string): DOMWrapper<Element> {
+  const button = findButtonByTip(wrapper, tipPrefix);
+  if (!button) throw new Error(`אין כפתור שהטולטיפ שלו מתחיל ב"${tipPrefix}"`);
   return button;
+}
+
+/**
+ * סלקטור CSS לפקד לפי הטולטיפ שלו — לשימוש ב-`find`/`findAll` ישירים.
+ *
+ * שני השדות מאותה סיבה בדיוק כמו ב-`findButtonByTip`.
+ */
+export function tipSelector(tip: string, tag = 'button'): string {
+  return `${tag}[data-tip-title="${tip}"],${tag}[data-tip-desc="${tip}"]`;
+}
+
+/** אותו דבר לפי תחילית, למקרים שהטקסט המלא נושא גם מספר או מידה שזזים. */
+export function tipStartsSelector(prefix: string, tag = 'button'): string {
+  return `${tag}[data-tip-title^="${prefix}"],${tag}[data-tip-desc^="${prefix}"]`;
+}
+
+/**
+ * הבוררים ברצועה, בלי לדעת מאיזה סוג הם.
+ *
+ * שני מימושים חיים זה לצד זה: `<select>` נייטיב (מרווח שורות), ובורר
+ * שאפשר להקליד בו — `<input role="combobox">` (גופן וגודל גופן; ראו
+ * RibbonCombo.vue).
+ * לבדיקה שמודדת „מה הבורר מציג” ו„מה קורה כשבוחרים” ההבדל בין השניים אינו
+ * העניין, ובלי העטיפה הזאת כל מעבר בין המימושים היה מפיל אותה מחדש.
+ */
+function pickerOf(wrapper: VueWrapper, tip: string): DOMWrapper<Element> {
+  const picker = wrapper.find(
+    `select[data-tip-title="${tip}"],input[role="combobox"][data-tip-title="${tip}"]`,
+  );
+  if (!picker.exists()) throw new Error(`אין בורר עם הטולטיפ „${tip}”`);
+  return picker;
+}
+
+/** מה שהבורר מציג בפועל ב-DOM. */
+export function pickerValue(wrapper: VueWrapper, tip: string): string {
+  return (pickerOf(wrapper, tip).element as HTMLSelectElement | HTMLInputElement).value;
+}
+
+/**
+ * בחירה בבורר, בדרך שהמשתמש עובר בה.
+ *
+ * ב-`<select>` זו השמה ואירוע `change`. בבורר החיפוש אין רשימה קבועה לבחור
+ * ממנה: מקלידים ומאשרים ב-Enter — וזה גם מה שמפעיל את הדירוג, כלומר את אותו
+ * מסלול שהמשתמש עובר בו ולא קיצור סביבו.
+ */
+export async function setPicker(
+  wrapper: VueWrapper,
+  tip: string,
+  value: string,
+): Promise<void> {
+  const picker = pickerOf(wrapper, tip);
+  if (picker.element.tagName === 'SELECT') {
+    await picker.setValue(value);
+    return;
+  }
+  await picker.trigger('focus');
+  await picker.setValue(value);
+  await picker.trigger('keydown', { key: 'Enter' });
+}
+
+const NO_TIP: TipContent = { title: '', shortcut: '', description: '' };
+
+/**
+ * שלושת שדות הטולטיפ של פקד, דרך הקוד שהתוכנה עצמה קוראת בו.
+ *
+ * `readTip` ולא קריאת תכונות ידנית: כך בדיקה שמאשרת „הכפתור אומר למה הוא
+ * מנוטרל” מודדת בדיוק את מה שהמשתמש יראה, ולא ייצוג מקביל שעלול להתפצל ממנו.
+ */
+export function tipOf(target: Element | { element: Element }): TipContent {
+  const element = target instanceof Element ? target : target.element;
+  return readTip(element) ?? NO_TIP;
+}
+
+/**
+ * שורת ההסבר של הפקד — ההסבר אם יש, אחרת הכותרת.
+ *
+ * למה איחוד ולא שדה אחד: אותו טקסט („הפעולה אינה זמינה בגרסה הזאת של המנוע”)
+ * יורד להסבר בפקד שיש לו תווית גלויה, ונשאר כותרת בכפתור אייקון. זה הכלל של
+ * `tipParts`, והוא נכון — אבל בדיקה ששואלת „מה הפקד אומר למשתמש” אינה אמורה
+ * להיות תלויה בו.
+ */
+export function tipMessage(target: Element | { element: Element }): string {
+  const tip = tipOf(target);
+  return tip.description || tip.title;
 }
 
 export function emittedCount(wrapper: VueWrapper, ignore: readonly string[] = ['click']): number {

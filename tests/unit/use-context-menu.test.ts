@@ -13,7 +13,7 @@
  *    מה שקורה ביניהן — סגירה, לחיצה שנייה, החלפת מסמך — חייב לנצח.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ref, shallowRef } from 'vue';
+import { shallowRef } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import { useContextMenu, type ContextMenuDeps } from '../../src/composables/use-context-menu';
 
@@ -110,9 +110,7 @@ function setup(over: Partial<ContextMenuDeps> = {}, fake = fakeSuperdoc()): Setu
   const runAction = vi.fn(() => true);
   const deps: ContextMenuDeps = {
     superdoc: shallowRef<SuperDoc | null>(fake.host),
-    shell: ref(shell),
     isDocumentSurface: (target) => target instanceof Node && documentArea.contains(target),
-    isFocusMode: ref(false),
     isModalOpen: () => false,
     runAction,
     report: () => {},

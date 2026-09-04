@@ -14,7 +14,8 @@
         <button
           type="button"
           class="id-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את הגדרות המפתח"
           @click="$emit('close')"
         >

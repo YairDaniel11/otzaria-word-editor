@@ -141,7 +141,13 @@ async function handle(method: string, payload: Record<string, unknown> = {}): Pr
         return { cancelled: false, token: payload.targetToken, name: target.name, size: blob.size };
       }
 
-      const suggested = `${String(payload.suggestedName ?? 'מסמך')}.docx`;
+      // הסיומת מהקריאה, כמו באוצריא — קבוע `.docx` היה מציע `ספר.txt.docx`
+      // בייצוא לפורמט אוצריא.
+      const suggestedBase = String(payload.suggestedName ?? 'מסמך');
+      const extension = String(payload.extension ?? 'docx');
+      const suggested = suggestedBase.toLowerCase().endsWith(`.${extension}`)
+        ? suggestedBase
+        : `${suggestedBase}.${extension}`;
       const name = window.prompt('שמור בשם (dev):', suggested);
       if (name === null) return { cancelled: true };
       // הורדה אמיתית, כדי שאפשר יהיה לפתוח את התוצר ב-Word.
@@ -231,6 +237,15 @@ async function handle(method: string, payload: Record<string, unknown> = {}): Pr
     case 'ui.exportPdf':
       console.info('[stub] ui.exportPdf', payload);
       return { saved: false, name: null };
+
+    /**
+     * `library.refreshUserBooks` — אין ספרייה בפיתוח. „אפס ספרים נקלטו” הוא
+     * המצב האמיתי מחוץ לאוצריא, והוא גם מפעיל את נוסח ההודעה שמסביר על
+     * תיקייה אישית — הנוסח שדווקא צריך בדיקה בדפדפן.
+     */
+    case 'library.refreshUserBooks':
+      console.info('[stub] library.refreshUserBooks');
+      return { addedBooks: 0, updatedBooks: 0, errors: [] };
 
     default:
       console.info('[stub] call לא ממומש:', method, payload);

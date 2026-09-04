@@ -1,5 +1,15 @@
-מסמכים מרובים (פתיחת כמה מסמכים במקביל, לא רק החלפה) — דורש גל ארכיטקטוני חדש, לא תוקן
-טיפול ברנספונסיות
-לסדר את הכפתורים בכל המקומות שיהיה לפעמים אחד על השני ולא רק אחד ליד השני כמו שיש בטאב של בית
-אם יוצרי טבלה שיכול לעביר את הסמן לאחרי הטבלה
-הוספת מאקרו: https://chatgpt.com/share/6a94a5a3-e0ac-83eb-9ff7-b47ae0eba386
+## באגים — issue #14
+
+ב. [תלוי באוצריא — עדיין פתוח למשתמשים] „העלאת המסמך נכשלה” בשמירה ובשמירה בשם. השורש באוצריא: שער ה-WebView (shouldInterceptRequest/shouldOverrideUrlLoading) מאשר לתוסף רק נתיבי /f/ וחוסם את ה-PUT ל-/w/<token> → Failed to fetch. התיקון (isUploadUriForPlugin) נכנס ל-Otzaria/otzaria dev ב-3.9.2026 (קומיט 0b8559402), **אך רק בשער של plugin_tab_page.dart**; שער מופע הרקע (plugin_background_host.dart, `_isOwnFileServerPath`) נשאר חסום — ומכיוון ש-`backgroundEntrypointPath` נופל ל-entrypoint של הדף המלא כשאין `backgroundEntrypoint` במניפסט, אותו קוד שמירה בדיוק רץ שם. תוקן ונפתח כ-Otzaria/otzaria#1160 (עם שער סטטי, plugin_webview_file_server_gate_test.dart, כדי שלא יתוקן שוב שער אחד וישכח השני). אינו בשום release. בצד התוסף (sessions/save-coordinator.ts): beginWrite ו-upload הופרדו להודעות מובחנות, בלי כפילות תחילית; ב-host/files.ts האבחון בודק GET ל-/f/probe (שעובר את השער) ולא לשורש — והוא זה שמאתר את התקלה בפועל, כי החסימה מגיעה כ-TypeError בלי סטטוס (לתשובת ה-403 של השער אין כותרות CORS; נוסף רישום ללוג הריצה בצד אוצריא). לסגור רק אחרי release של אוצריא עם התיקון ושמירה אמיתית ב-Windows.
+
+## פיצ'רים
+
+בדיקת איות תורנית (issue #25) — נכנסה.
+(ב) [פתוח] אין הצעות תיקון, רק סימון. הצעות דורשות מרחק עריכה על 102,469 ערכים, וזו החלטת ביצועים בפני עצמה.
+
+## מעקב מנוע
+
+באנר „edit-rejected” של superdoc@2.11.0 — מוסתר אצלנו ב-engine-chrome.css, כי הוא מצויר באנגלית גם תחת `ui: false`. דווח כ-superdoc/docx-editor#3957. בכל שדרוג מנוע לבדוק אם נסגר (מתג, הגדרת טקסטים, או כיבוד `ui: false`) — ואז למחוק את הכלל ואת tests/contract/engine-edit-rejected-banner.test.ts, במקום להשאיר הסתרה מיותרת
+
+
+https://mitmachim.top/post/1238414

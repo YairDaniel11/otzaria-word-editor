@@ -52,7 +52,8 @@ describe('applyDocStyleDefaults', () => {
     expect(outcome).toEqual({ ok: true });
     expect(calls[0]).toMatchObject({
       target: { scope: 'docDefaults', channel: 'run' },
-      patch: { fontSize: 28 },
+      // `fontSizeCs` לצדו — בלעדיו הגודל אינו חל על עברית כלל (w:szCs).
+      patch: { fontSize: 28, fontSizeCs: 28 },
     });
   });
 
@@ -110,12 +111,59 @@ describe('applyDocStyleDefaults', () => {
 });
 
 describe('readDefaultFontSizePt', () => {
-  it('dryRun מחזיר before.fontSize בחצאי-נקודות והוא מומר לנקודות', async () => {
+  it('dryRun מחזיר את הגודל בחצאי-נקודות והוא מומר לנקודות', async () => {
     const { host } = fakeDoc({
-      apply: () => ({ success: true, changed: false, dryRun: true, before: { fontSize: 24 }, after: {} }),
+      apply: () => ({
+        success: true,
+        changed: false,
+        dryRun: true,
+        before: { fontSize: 24, fontSizeCs: 24 },
+        after: {},
+      }),
     });
 
     await expect(readDefaultFontSizePt(host)).resolves.toBe(12);
+  });
+
+  /**
+   * המקרה שהצדיק את השינוי: מסמך מ-Word שבו הלטיני 11 נק' והעברי 16 —
+   * צירוף שכיח בספרי קודש. הדיאלוג חייב להציג את **העברי**, אחרת מי שמתקן
+   * את הלטיני מקטין את כל גוף הספר בלי לראות את המספר שהוא משנה.
+   */
+  it('כששני הערוצים נבדלים, המדווח הוא של העברית (szCs)', async () => {
+    const { host } = fakeDoc({
+      apply: () => ({
+        success: true,
+        changed: false,
+        dryRun: true,
+        before: { fontSize: 22, fontSizeCs: 32 },
+        after: {},
+      }),
+    });
+
+    await expect(readDefaultFontSizePt(host)).resolves.toBe(16);
+  });
+
+  it('מסמך בלי szCs נופל ל-fontSize', async () => {
+    const { host } = fakeDoc({
+      apply: () => ({ success: true, changed: false, dryRun: true, before: { fontSize: 22 }, after: {} }),
+    });
+
+    await expect(readDefaultFontSizePt(host)).resolves.toBe(11);
+  });
+
+  /** בלי שני הערוצים בבקשה, ה-`before` לא היה מחזיר `fontSizeCs` לעולם. */
+  it('הבקשה עצמה שואלת על שני הערוצים', async () => {
+    const { host, calls } = fakeDoc({
+      apply: () => ({ success: true, changed: false, dryRun: true, before: { fontSize: 24 }, after: {} }),
+    });
+
+    await readDefaultFontSizePt(host);
+
+    expect((calls[0] as { patch: Record<string, unknown> }).patch).toEqual({
+      fontSize: 0,
+      fontSizeCs: 0,
+    });
   });
 
   it('dryRun שנזרק מחזיר null ולא זורק', async () => {

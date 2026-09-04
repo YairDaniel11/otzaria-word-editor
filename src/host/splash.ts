@@ -17,7 +17,7 @@
 /** ה-API שהסקריפט ב-index.html מפרסם על `window`. */
 interface SplashApi {
   set(target: number, text?: string): void;
-  fail(text?: string): void;
+  fail(text?: string, detail?: string): void;
   done(): void;
 }
 
@@ -52,9 +52,9 @@ export function splashStage(target: number, text?: string): void {
   api()?.set(target, text);
 }
 
-/** כשל סופי. המסך נשאר על המסך עם ההודעה. */
-export function splashFail(text: string): void {
-  api()?.fail(text);
+/** כשל סופי. המסך נשאר על המסך עם ההודעה. `detail` הוא הפירוט הטכני. */
+export function splashFail(text: string, detail?: string): void {
+  api()?.fail(text, detail);
 }
 
 /** סוגר את מסך הטעינה ומסיר אותו מה-DOM. אידמפוטנטי. */

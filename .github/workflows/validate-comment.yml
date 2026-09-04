@@ -1,0 +1,92 @@
+# פרסום טבלת הוולידטור כתגובה על ה-PR — גם כשה-PR מגיע מ-fork.
+#
+# למה workflow נפרד: ב-pull_request מ-fork הטוקן הוא לקריאה בלבד תמיד
+# (מגבלת GitHub, בלי קשר ל-`permissions:`), ולכן ה-action שרץ ב-Validate
+# מדלג שם על התגובה באזהרה. `workflow_run` רץ בהקשר של מאגר הבסיס עם
+# הרשאות כתיבה, קורא את הטבלה שה-Validate העלה כ-artifact, ומפרסם אותה —
+# באותו פורמט בדיוק שה-action עצמו מפרסם (אותו סמן חבוי, אותה החלפה של
+# התגובה הקודמת), כך שיש תמיד תגובת סיכום אחת ולא שרשרת.
+#
+# בטיחות — הדפוס המומלץ של GitHub ל-workflow_run: תוכן ה-artifact מגיע
+# מריצה על קוד של ה-PR ולכן הוא לא-אמין; הוא נקרא כטקסט בלבד ומודבק לתוך
+# תגובה, שום דבר ממנו אינו מורץ. מספר ה-PR אינו נלקח מה-artifact אלא נפתר
+# מול ה-API לפי ראש הענף של הריצה — artifact זדוני אינו יכול להפנות את
+# התגובה ל-PR אחר.
+#
+# הערה: workflow_run נדלק רק כשהקובץ הזה נמצא בענף ברירת המחדל — כלומר
+# הוא מתחיל לעבוד אחרי המיזוג ל-main, לא על ה-PR שמוסיף אותו.
+name: Validate comment
+
+on:
+  workflow_run:
+    workflows: [Validate]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  actions: read
+
+jobs:
+  comment:
+    name: תגובת הוולידטור על ה-PR
+    # רק PR מ-fork: ב-PR מאותו מאגר ה-action עצמו כבר פרסם (`pr-comment`),
+    # וריצה כאן הייתה מוחקת את התגובה הטרייה שלו ומפרסמת אותה מחדש —
+    # התראה נוספת לכל הנרשמים, והתגובה נודדת לתחתית השרשור בכל דחיפה.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name != github.repository
+    runs-on: ubuntu-latest
+
+    steps:
+      # continue-on-error: ריצה שקרסה לפני שהוולידטור כתב טבלה לא העלתה
+      # artifact — ואז אין מה לפרסם, וזה אינו כשל של ה-workflow הזה.
+      - name: Download the validator summary
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: validator-summary
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Post or replace the summary comment
+        if: steps.download.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const file = 'validator-summary.md';
+            if (!fs.existsSync(file)) {
+              core.info('אין קובץ סיכום — אין מה לפרסם.');
+              return;
+            }
+            // תקרת גודל של תגובת GitHub היא 65536 תווים; הסמן והקישור צריכים מקום.
+            const markdown = fs.readFileSync(file, 'utf8').slice(0, 60000);
+
+            // מספר ה-PR נפתר מה-API לפי ראש הענף של הריצה — לא מהתוכן הלא-אמין.
+            const run = context.payload.workflow_run;
+            const head = `${run.head_repository.owner.login}:${run.head_branch}`;
+            const { owner, repo } = context.repo;
+            const prs = await github.rest.pulls.list({ owner, repo, state: 'open', head });
+            const pr = prs.data.find((p) => p.head.sha === run.head_sha) ?? prs.data[0];
+            if (!pr) {
+              core.info(`לא נמצא PR פתוח לראש ${head} — אין איפה לפרסם.`);
+              return;
+            }
+
+            // אותו פורמט בדיוק כמו src/prComment.js של ה-action: סמן חבוי,
+            // הטבלה כפי שהיא, וקישור לריצה המלאה. הסמן הוא גם מה שמאפשר
+            // החלפה — לוולידטור עצמו ולנו — במקום תגובות שנערמות.
+            const marker = '<!-- otzaria-plugin-validator:summary -->';
+            const body = `${marker}\n${markdown}\n\n[הרצה מלאה](${run.html_url})`;
+
+            const comments = await github.rest.issues.listComments({
+              owner, repo, issue_number: pr.number, per_page: 100,
+            });
+            for (const c of comments.data) {
+              if (typeof c.body === 'string' && c.body.includes(marker)) {
+                await github.rest.issues.deleteComment({ owner, repo, comment_id: c.id });
+              }
+            }
+            await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body });
+            core.info(`התגובה פורסמה על PR #${pr.number}.`);

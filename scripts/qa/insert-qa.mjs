@@ -9,7 +9,7 @@
  */
 import { openApp, createReport } from './harness.mjs';
 
-const PORT = 9363;
+const PORT = Number(process.env.QA_PORT ?? 9363);
 const report = createReport('לשונית „הוספה”');
 
 /** PNG של 1×1 — הקטן ביותר שאפשר להטמיע, ומספיק כדי לראות אם המנוע הטמיע. */
@@ -144,17 +144,22 @@ async function sectionPages() {
     await widen(app);
     await app.tab('הוספה');
 
-    await step('התחל בעמוד חדש — בלי סמן', async () => {
+    /*
+     * השורה הזאת בדקה „לחיצה בלי סמן מדווחת למשתמש”, ומצב „בלי סמן” אינו
+     * בר-השגה יותר: `applyDocumentStartCaret` (engine/caret-anchor.ts) מציב
+     * סמן בתחילת המסמך בפתיחה, ו-`app.reset()` מנקה רק את הודעות הדמה ולא
+     * את הבחירה. לכן היא מודדת עכשיו את מצב הפתיחה עצמו — שהפקד זמין מיד —
+     * ואינה לוחצת: לחיצה כאן הייתה כותבת `w:pageBreakBefore` למסמך הריק,
+     * והשלב הבא (שמודד את הכתיבה על הפסקה הנכונה) היה מדלג על עצמו
+     * ב-`wasBefore`.
+     */
+    await step('פתיחה עם סמן — הפקד זמין מיד', async () => {
       await app.reset();
       const st = await app.state('התחל בעמוד חדש');
-      log('מצב הכפתור לפני מיקום סמן:', JSON.stringify(st));
-      await app.click('התחל בעמוד חדש', { after: 1200 });
-      log('status:', JSON.stringify(await app.status()), 'msgs:', JSON.stringify(await app.messages()));
-      const s = await app.status();
-      const msgs = await app.messages();
-      const told = s?.text || msgs.map((m) => m.text).join(' ');
-      if (told && /סמן/.test(told)) report.pass('התחל בעמוד חדש — בלי סמן מדווח', told);
-      else report.partial('התחל בעמוד חדש — בלי סמן', `לא נאמר כלום למשתמש (status=${JSON.stringify(s)})`);
+      log('מצב הכפתור בפתיחה:', JSON.stringify(st));
+      st.found && !st.disabled
+        ? report.pass('פתיחה עם סמן — הפקד זמין מיד', JSON.stringify(st))
+        : report.fail('פתיחה עם סמן — הפקד זמין מיד', `לא נמצא או מושבת: ${JSON.stringify(st)}`);
     });
 
     await seed(app);

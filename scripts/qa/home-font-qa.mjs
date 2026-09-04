@@ -16,7 +16,7 @@ const PHASES = (process.env.QA_PHASES ?? '1,2,3,4,5,6,7,8').split(',').map(Numbe
 const on = (n) => PHASES.includes(n);
 
 const report = createReport('בית — לוח וגופן');
-const app = await openApp({ name: 'home-font', port: 9361 });
+const app = await openApp({ name: 'home-font', port: Number(process.env.QA_PORT ?? 9361) });
 
 const notes = [];
 function note(...p) {

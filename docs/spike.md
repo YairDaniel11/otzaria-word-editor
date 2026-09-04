@@ -41,7 +41,6 @@
 | עטיפת ה־SDK, latch של `plugin.boot` | `src/host/otzaria-client.ts` |
 | ערכת נושא → CSS variables | `src/host/theme.ts` |
 | בורר קבצים של אוצריא | `src/host/files.ts` |
-| הורדת קובץ (זמני, שלב 0 בלבד) | `src/host/download.ts` |
 | stub לפיתוח בדפדפן | `src/host/dev-stub.ts` |
 | הקמת המנוע ב־`ui: false` | `src/engine/create-editor.ts` |
 | Workers כ־blob URLs | `src/engine/workers.ts` |
@@ -150,8 +149,8 @@ Windows (§5). גודל ה־`.otzplugin` **כן** נמדד (4.32MB, ראו הט�
 
 - [x] „שמור” ו„שמור בשם” מול API הכתיבה — מומשו
   (`src/sessions/save-coordinator.ts`) ואומתו מקצה לקצה מ־`file://` עם stub של
-  ה-Host: ייצוא, `beginBinaryWrite`, PUT, `commit`. `<a download>` נשאר
-  כ„ייצוא” נפרד.
+  ה-Host: ייצוא, `beginBinaryWrite`, PUT, `commit`. מסלול ה-`<a download>`
+  שהיה „ייצוא ל-Word” נפרד הוסר — הוא נראה כמו שמירה ולא היה שמירה.
 - [ ] „שמור” מול אוצריא אמיתית. ה-API קיים רק בענף
   `docs/plugin-sdk-type-accuracy` של אוצריא; `minAppVersion` הועלה ל־0.9.97
   לפי ההנחה שזו הגרסה שתכיל אותו, **ויש לאמת את המספר כשהיא תשוחרר**. עד אז

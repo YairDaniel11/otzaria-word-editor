@@ -163,6 +163,34 @@ describe('חוזה הרשימה', () => {
     }
   });
 
+  it('רשומת tab-goto נושאת מיקום שלם וחיובי', () => {
+    // הפעולה אחת לשמונה רשומות, וההבדל ביניהן הוא ה-payload בלבד. רשומה
+    // בלי מיקום תקין אינה נופלת בשום מקום — `actions.ts` פשוט אינו קורא
+    // למטפל, והצירוף נבלע ולא עושה דבר.
+    const positions = ENTRIES.filter((shortcut) => shortcut.action === 'tab-goto').map(
+      (shortcut) => shortcut.payload,
+    );
+
+    expect(positions.length).toBeGreaterThan(0);
+    for (const position of positions) {
+      expect(typeof position).toBe('number');
+      expect(Number.isInteger(position as number)).toBe(true);
+      expect(position as number).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('אין רשומת Alt על מקש בלוח הספרות', () => {
+    // ב-Windows `Alt`+ספרה בלוח הספרות היא הזנת תו לפי קוד (Alt-code). רשומה
+    // שתופסת אותה גוזלת דרך הקלדה קיימת של תווים, ולא מודיעה על כך לאיש.
+    const numpad = ENTRIES.filter(
+      (shortcut) =>
+        shortcut.alt === true &&
+        combos(shortcut).some((combo) => /Numpad\d/.test(combo)),
+    ).map((shortcut) => shortcut.id);
+
+    expect(numpad).toEqual([]);
+  });
+
   it('הקיבוץ מכסה את כל הרשומות', () => {
     const grouped = shortcutsByGroup().flatMap((entry) => entry.items);
     expect(grouped).toHaveLength(ENTRIES.length);
@@ -205,6 +233,57 @@ describe('החוזה מול המקור', () => {
     const labelWithCombo = /(?::?(?:title|tooltip|aria-label)=)[^\n]*(?:Ctrl|Alt|Shift)\s*\+\s*[A-Za-z0-9[\]]/i;
 
     expect(hits(labelWithCombo, (path) => path === REGISTRY)).toEqual([]);
+  });
+
+  it('אין תווית קיצור כתובה ביד ב-placeholder — למעט דוגמה מפורשת', () => {
+    // `placeholder` חמק מהבדיקה שמעל, ו-`TellMeSearch.vue` ניצל את זה בלי
+    // כוונה: `placeholder="…(Alt+Q)"`. זו תווית לכל דבר, והיא נכנסת לכלל.
+    //
+    // **„למשל” הוא היוצא מן הכלל, והוא אמיתי.** ב-`MacrosDialog.vue` יש
+    // ארבעה `placeholder="למשל: Ctrl+Alt+1 (רשות)"` — הם מתארים מה שהמשתמש
+    // עצמו עומד להקליד בשדה כדי לקשור מאקרו משלו, ואינם מבטיחים דבר על
+    // binding שלנו. אותה הבחנה בדיוק שבגללה „יש להדביק עם Ctrl+V” מותרת
+    // ב-engine/clipboard.ts: הוראה אינה הבטחה.
+    const promiseInPlaceholder =
+      /:?placeholder="(?![^"]*למשל)[^"]*(?:Ctrl|Alt|Shift)\s*\+\s*[A-Za-z0-9[\]]/i;
+
+    expect(hits(promiseInPlaceholder, (path) => path === REGISTRY)).toEqual([]);
+  });
+
+  it('אין תווית קיצור כתובה ביד בצומת טקסט של תבנית', () => {
+    // ההרחבה שסגרה נקודה עיוורת מוכחת: `TellMeSearch.vue` החזיק שלוש תוויות
+    // כתובות ביד — `placeholder="…(Alt+Q)"`, `<span>Alt+Q</span>` ו-
+    // `<kbd>Ctrl+F</kbd>` — והבדיקה שמעל הייתה ירוקה, מפני שהיא סורקת
+    // מאפיינים בלבד. התוויות היו נכונות באותו רגע; מה שהיה שבור הוא ההגנה,
+    // וזו בדיוק הנסיגה שהרשימה נבנתה כדי למנוע.
+    //
+    // מה שנאסר הוא צירוף **בין תגיות**, כלומר טקסט שהמשתמש קורא. מחרוזת
+    // בקוד או בהערה אינה נתפסת כאן, וגם לא צריכה — היא אינה הבטחה על binding.
+    const textNodeCombo = />\s*(?:Ctrl|Alt|Shift)\s*\+\s*[A-Za-z0-9[\]][^<]*</;
+
+    expect(hits(textNodeCombo, (path) => path === REGISTRY || !path.endsWith('.vue'))).toEqual([]);
+  });
+
+  it('קטלוג Tell Me אינו מגדיל את רשימת התוויות הכתובות ביד', () => {
+    // רשימת תוויות שנייה היא בדיוק מה שהיה כאן לפני הרשימה הזאת. ב-Tell Me
+    // (`ui/shell/tell-me-actions.ts`) היא חזרה בדלת האחורית — 44 שורות
+    // `shortcut: '…'` — וארבע מהן כבר נפרדו מהמאזין: „הגדלת/הקטנת גופן”
+    // הבטיחו `Ctrl+Shift+.`/`,` מול `Ctrl+]`/`Ctrl+[` שברשימה, „הפעלת מאקרו”
+    // הבטיחה `Alt+F9` שאינו קיים כלל, ו„הקלטת מאקרו” הראתה `Alt+F8` — הצירוף
+    // של פעולה אחרת (ניהול מאקרו). כלומר לא סכנה תיאורטית אלא סטייה שכבר קרתה.
+    //
+    // הארבע תוקנו ועוברות דרך `shortcutLabel`. הבדיקה כאן חוסמת **גידול**:
+    // המספר יורד כשממירים עוד, ולעולם אינו עולה. היא אינה אוסרת אותן לגמרי
+    // מפני שהמזהים שם אינם מזהי הרשימה (`file-save` מול `save`), ולכן ההמרה
+    // דורשת טבלת מיפוי ולא החלפה מכנית — חוב מתועד, לא תקלה.
+    const CATALOG = 'ui/shell/tell-me-actions.ts';
+    const HAND_WRITTEN_TODAY = 40;
+
+    const catalog = sources.find((entry) => entry.path === CATALOG);
+    expect(catalog, `${CATALOG} — הקובץ לא נמצא, והבדיקה עברה על ריק`).toBeDefined();
+    const written = [...catalog!.text.matchAll(/shortcut: '[^']*'/g)].length;
+
+    expect(written).toBeLessThanOrEqual(HAND_WRITTEN_TODAY);
   });
 
   it('דיאלוג שסוגר את עצמו ב-Escape עוצר את האירוע', () => {

@@ -29,6 +29,16 @@
         :disabled="!sdkAvailable"
         @click="$emit('open-library')"
       />
+      <!-- הייצוא יושב כאן ולא ב„קובץ”: הוא פעולה מול אוצריא — הקובץ נכתב
+           בפורמט הספרים שלה ונקלט לספרייה — ומי שמחפש אותו מחפש „אוצריא”. -->
+      <RibbonButton
+        icon="export"
+        label="ייצוא לאוצריא"
+        variant="large"
+        :tooltip="exportBookTooltip"
+        :disabled="!hasDocument"
+        @click="$emit('export-otzaria')"
+      />
       <RibbonButton
         icon="highlight"
         label="השלמה מהספר"
@@ -51,7 +61,7 @@
         :disabled="!macrosAvailable"
         @click="$emit('manage-macros')"
       />
-      <div class="column-items">
+      <RibbonStack>
         <RibbonButton
           :label="isRecording ? 'עצור הקלטה' : 'הקלט מאקרו'"
           shortcut-id="macro-record"
@@ -69,12 +79,12 @@
           :disabled="!macrosAvailable"
           @click="$emit('macro-play')"
         />
-      </div>
+      </RibbonStack>
     </RibbonGroup>
 
     <!-- תבניות תורניות. ראו ההסבר ב-script: אין למנוע דרך ציבורית ליצור סגנון. -->
     <RibbonGroup title="סגנון תורני">
-      <div class="column-items">
+      <RibbonStack>
         <RibbonButton
           label="חידוש"
           variant="small"
@@ -93,7 +103,7 @@
           :tooltip="TORAH_STYLE_UNAVAILABLE"
           :disabled="true"
         />
-      </div>
+      </RibbonStack>
     </RibbonGroup>
   </div>
 </template>
@@ -112,6 +122,7 @@
 import { computed, inject, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
+import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import { ACTIVE_MACROS, type MacrosHandle } from '../../../engine/macros';
@@ -129,6 +140,7 @@ defineEmits<{
   (e: 'insert-citation'): void;
   (e: 'search-otzaria'): void;
   (e: 'open-library'): void;
+  (e: 'export-otzaria'): void;
   (e: 'manage-macros'): void;
   (e: 'macro-record'): void;
   (e: 'macro-play'): void;
@@ -137,17 +149,9 @@ defineEmits<{
 
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 
-/**
- * מערכת המאקרו של המסמך הפתוח. `null` בלי מסמך — ואז הכפתורים מנוטרלים,
- * מאותו טעם כמו `canSearch`: כפתור שאינו יכול לעבוד נראה כך לפני הלחיצה.
- */
+/** מצב המאקרו של המסמך הפתוח; הוא אינו תלוי ב-SDK של אוצריא. */
 const macros = inject(ACTIVE_MACROS, shallowRef<MacrosHandle | null>(null));
 const macrosAvailable = computed(() => macros.value !== null);
-
-/**
- * מצב ההקלטה, מתוך ה-ref שה-handle חושף: הכפתור צריך להתחלף ל„עצור הקלטה”
- * גם כשההקלטה התחילה מהמקלדת (Ctrl+Alt+R), לא רק מלחיצה עליו.
- */
 const isRecording = computed(() => macros.value?.recording.value ?? false);
 
 function macrosTooltip(available: string): string {
@@ -223,6 +227,18 @@ const citationTooltip = computed(() => {
   return 'הכנסת הקטע המסומן בקורא של אוצריא, עם המקור, במיקום הסמן';
 });
 
+/**
+ * הייצוא אינו דורש את ה-SDK: מחוץ לאוצריא (`host/dev-stub.ts`) מסלול השמירה
+ * ממומש בכפיל, וכך הוא נבדק בדפדפן. מה שהוא כן דורש הוא מסמך פתוח.
+ */
+const hasDocument = computed(() => superdoc.value !== null);
+
+const exportBookTooltip = computed(() =>
+  hasDocument.value
+    ? 'שמירת המסמך כספר בפורמט של אוצריא (טקסט עם רמות כותרות), לקליטה בספרייה'
+    : 'יש לפתוח מסמך תחילה',
+);
+
 const searchTooltip = computed(() => {
   if (!sdkAvailable) return OUTSIDE_OTZARIA;
   if (superdoc.value === null) return 'יש לפתוח מסמך ולסמן בו את הטקסט לחיפוש';
@@ -245,13 +261,5 @@ const bookCompletionTooltip = computed(() => {
   align-items: stretch;
   gap: 0;
   height: 100%;
-}
-
-.column-items {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  justify-content: center;
-  flex-shrink: 0;
 }
 </style>

@@ -32,7 +32,7 @@
 import { execSync } from 'node:child_process';
 import { openApp, createReport, sleep } from './harness.mjs';
 
-const PORT = 9362;
+const PORT = Number(process.env.QA_PORT ?? 9362);
 const report = createReport('בית — פיסקה, סגנונות, עריכה');
 
 /** דפדפן ששרד ריצה קודמת מחזיק את היציאה, ו-`openPage` מתחבר אליו במקום
@@ -203,7 +203,7 @@ function makeCtx(app) {
   async function clickStyle(label) {
     const raw = await js(`(() => {
       const card = Array.from(document.querySelectorAll('.style-card'))
-        .find(c => (c.getAttribute('title') || '') === ${JSON.stringify(label)});
+        .find(c => (c.getAttribute('data-tip-title') || '') === ${JSON.stringify(label)});
       if (!card) return 'null';
       card.scrollIntoView({ block: 'nearest', inline: 'center' });
       const r = card.getBoundingClientRect();
@@ -334,8 +334,23 @@ const LINES = ['alpha rho', 'beta', 'gamma', 'delta', 'epsilon rho', 'zeta'];
 await phase('שלב א — קבוצת „פיסקה"', async (app, ctx) => {
   const { js, caretAt, selectPara, clickEl, fill, docx, clickStyle, clean, closeDialogs, step, seed, TEXT_BOX } = ctx;
 
-  /* -------- בלי סמן -------- */
-  await step('התנהגות בלי סמן', async () => {
+  /* -------- מצב הפתיחה --------
+   *
+   * השורה הזאת מדדה עד עכשיו את ההפוך: „מסמך טרי הוא בלי סמן, ולכן כל פקדי
+   * הפסקה מושבתים ב-`reason=selection-required`”. זה אינו נכון יותר, ולא
+   * מפני שמשהו נשבר — `applyDocumentStartCaret` (engine/caret-anchor.ts,
+   * נקרא בסוף `openDocumentInto`) מציב סמן בתחילת המסמך בפתיחה, כמו Word,
+   * כי קודם כל הקלדה נבלעה עד קליק עכבר.
+   *
+   * ומצב „בלי סמן” אינו בר-השגה כאן: `app.reset()` מנקה את הודעות הדמה
+   * ואינו נוגע בבחירה, ואין דרך אחרת בשער לבטל סמן שהוצב. לכן השורה מודדת
+   * עכשיו את מה שהפיצ'ר מבטיח — שאפשר לעצב מיד עם הפתיחה, בלי קליק מקדים —
+   * ואת מה שלא השתנה: „סימני עיצוב” זמין כי הוא אינו תלוי בחירה.
+   *
+   * נמדד לפני ואחרי, על אותה מכונה: על d38a36c ‏`indent-increase` חזר
+   * `enabled:false, reason:"selection-required"`, ועל 8c776e9 ‏`enabled:true`.
+   */
+  await step('פתיחה עם סמן — פקדי הפסקה זמינים מיד', async () => {
     const ids = ['bullet-list', 'numbered-list', 'indent-increase', 'indent-decrease',
       'direction-rtl', 'direction-ltr', 'text-align', 'line-height', 'linked-style'];
     const states = {};
@@ -346,11 +361,14 @@ await phase('שלב א — קבוצת „פיסקה"', async (app, ctx) => {
     for (const n of names) ui[n] = (await app.state(n)).disabled;
     const gallery = await app.galleryItems();
     const marks = await app.cmd('formatting-marks');
-    console.log('בלי סמן — פקודות:', JSON.stringify(states));
-    console.log('בלי סמן — מושבתים:', JSON.stringify(ui), '| גלריה מושבתת?', gallery.every((g) => g.disabled), '| marks:', JSON.stringify(marks));
-    Object.values(ui).every(Boolean) && ids.every((id) => states[id].enabled === false) && gallery.every((g) => g.disabled) && marks.enabled
-      ? report.pass('התנהגות בלי סמן', 'כל פקדי הפסקה והגלריה מושבתים (reason=selection-required); „סימני עיצוב" נשאר זמין — הוא אינו תלוי בחירה')
-      : report.fail('התנהגות בלי סמן', JSON.stringify({ ui, states, galleryDisabled: gallery.map((g) => g.disabled), marks }));
+    console.log('בפתיחה — פקודות:', JSON.stringify(states));
+    console.log('בפתיחה — מושבתים:', JSON.stringify(ui), '| גלריה מושבתת?', gallery.every((g) => g.disabled), '| marks:', JSON.stringify(marks));
+    Object.values(ui).every((disabled) => disabled === false) &&
+    ids.every((id) => states[id].enabled === true) &&
+    gallery.every((g) => !g.disabled) &&
+    marks.enabled
+      ? report.pass('פתיחה עם סמן — פקדי הפסקה זמינים מיד', 'סמן הפתיחה הוצב: כל פקדי הפסקה והגלריה זמינים בלי קליק מקדים, ו„סימני עיצוב" זמין כתמיד')
+      : report.fail('פתיחה עם סמן — פקדי הפסקה זמינים מיד', JSON.stringify({ ui, states, galleryDisabled: gallery.map((g) => g.disabled), marks }));
   });
 
   await seed(LINES);

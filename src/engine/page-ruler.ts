@@ -889,25 +889,35 @@ export function measureAllPageTextRuns(
   return out;
 }
 
+/**
+ * שתי רשימות מלבנים גולמיים שקולות. חצי פיקסל הוא הרזולוציה שכל המדידות כאן
+ * עובדות בה — מתחתיה זו רעידה של `getClientRects` ולא תזוזה.
+ */
+function sameRawRects(a: readonly RawTextRect[], b: readonly RawTextRect[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (
+      Math.abs(x.leftPx - y.leftPx) >= 0.5 ||
+      Math.abs(x.topPx - y.topPx) >= 0.5 ||
+      Math.abs(x.widthPx - y.widthPx) >= 0.5 ||
+      Math.abs(x.heightPx - y.heightPx) >= 0.5
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** כמו `sameContentRects`, על רשימת ריצות-טקסט שטוחה. */
 function sameTextRuns(a: readonly PageTextRun[], b: readonly PageTextRun[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
     const x = a[i]!;
     const y = b[i]!;
-    if (x.text !== y.text || x.direction !== y.direction || x.rects.length !== y.rects.length) return false;
-    for (let j = 0; j < x.rects.length; j++) {
-      const rx = x.rects[j]!;
-      const ry = y.rects[j]!;
-      if (
-        Math.abs(rx.leftPx - ry.leftPx) >= 0.5 ||
-        Math.abs(rx.topPx - ry.topPx) >= 0.5 ||
-        Math.abs(rx.widthPx - ry.widthPx) >= 0.5 ||
-        Math.abs(rx.heightPx - ry.heightPx) >= 0.5
-      ) {
-        return false;
-      }
-    }
+    if (x.text !== y.text || x.direction !== y.direction) return false;
+    if (!sameRawRects(x.rects, y.rects)) return false;
   }
   return true;
 }
@@ -1006,6 +1016,424 @@ export function watchAllPageTextRuns(options: AllPageTextRunsWatchOptions): Page
       }
     },
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* טווחים בתוך שורת טקסט — לבדיקת האיות                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * הקורא הרביעי, וזה שהוא צריך שונה מכל השלושה שלפניו: לא מלבן של עמוד, לא
+ * מלבן של שורה ולא מלבן של צומת שלם — אלא מלבן של **קטע בתוך צומת**, כדי
+ * למתוח קו גלי מתחת למילה אחת (ui/shell/SpellingOverlay.vue).
+ *
+ * ## למה מכאן, ולא דרך `ui.viewport.getRect`
+ *
+ * למנוע **יש** API ציבורי שפותר טווח טקסט לגיאומטריה: `ui.viewport.getRect
+ * ({ target, relativeTo })` עם `SelectionTarget` של בלוק+היסטים, בדיוק אותו
+ * יעד ש-engine/search.ts כבר בונה. הוא נמדד ועובד (Chrome headless על ה-dist
+ * הארוז): 288 טווחים, כולם נפתרו, מלבן לכל אחד.
+ *
+ * ומה שנמדד יחד איתו הוא הסיבה שהוא לא נבחר: **0.15ms לקריאה**. עמוד עברי
+ * ממוצע הוא ~400 מילים, מהן ~5% אינן במילון — 20 קריאות לעמוד זה עוד סביר,
+ * אבל הסימון נמדד מחדש בכל גלילה, וב„הצג הכול” על מסמך בן עשרות עמודים זה
+ * מגיע למאות מילישניות לפריים. המסלול כאן — TreeWalker ‏+ `Range` על אותו
+ * תוכן — נמדד **1.2ms לעמוד שלם** (31 צמתים, 480 מילים נסרקו, 24 טווחים
+ * נמדדו): פי 60 פחות, ובלי להישען על שום מבנה פנימי של המנוע.
+ *
+ * זו אותה טכניקה תקנית בדיוק שכבר עומדת מאחורי `measurePageContentRects`
+ * ו-`measurePageTextRuns` למעלה, רק ברזולוציה של קטע בתוך צומת. `getRect`
+ * נשאר המסלול הנכון לקריאה **בודדת** (למשל „גלול אל השגיאה הבאה”), ולא
+ * למאות בפריים.
+ *
+ * ## קיבוץ: „מה נחשב שורת טקסט אחת”
+ *
+ * מילה יכולה להתפצל לשני צמתים כשהעיצוב משתנה באמצעה (חצי מודגש), וסריקה
+ * צומת-צומת הייתה מסמנת שתי שגיאות במקום מילה אחת מוכרת. לכן צמתים עוקבים
+ * מצורפים לפי **האב הראשון שאינו אלמנט inline** — לפי שם התגית, ולא לפי שם
+ * מחלקה של המנוע (‏tests/unit/engine-boundaries.test.ts אוסר, ובצדק: המנוע
+ * מתעד את שמות המחלקות שלו כחוזה פנימי). בפועל הטיפוס הוא צעד אחד: הצומת
+ * יושב ב-`<span>`, וההורה שלו הוא כבר `<div>`.
+ *
+ * **תגית ולא `getComputedStyle`**, ושלוש סיבות: היא אינה עולה כלום בלולאה
+ * שרצה על כל צומת בעמוד; היא נותנת אותה תשובה בכל סביבה (ב-jsdom
+ * `getComputedStyle(span).display` הוא מחרוזת ריקה, כלומר בדיקה שרצה שם
+ * הייתה מודדת התנהגות שאינה קיימת בדפדפן); ותגית שאינה מוכרת מטופלת כבלוק —
+ * הכיוון הבטוח, שחותך קבוצה במקום להדביק שתי שורות למילה שאינה קיימת.
+ *
+ * הגבול הזה גם מספיק: המנוע מצייר **בלוק לכל שורה חזותית** (נמדד), ומילה
+ * אינה נשברת בין שורות — כלומר קבוצה אחת מכילה מילים שלמות בלבד.
+ *
+ * ## היקף: רק העמודים שרואים
+ *
+ * `measureAllPageTextRuns` סורק את כל העמודים, כי הוא מיישר רצף מול
+ * `blocks.list()` וחייב להיות שלם. כאן אין רצף לשמור — כל קבוצה עומדת בפני
+ * עצמה — ולכן נסרקים רק עמודים שנחתכים עם החלון (בתוספת `marginPx`). זה מה
+ * שהופך מסמך בן שמונים עמודים לאותה עלות כמו מסמך בן שניים.
+ */
+
+/** טווח בקואורדינטות-הטקסט של קבוצה אחת, כפי ש-`select` מחזירה. */
+export interface TextSegment {
+  readonly start: number;
+  readonly end: number;
+}
+
+/** טווח שנמדד: הטקסט שלו, ומלבן לכל תיבה שהוא נפרס עליה. */
+export interface MeasuredSegment {
+  readonly text: string;
+  readonly rects: readonly RawTextRect[];
+}
+
+export interface TextSegmentOptions {
+  /** כמה פיקסלים מעבר לחלון עדיין נסרקים, כדי שגלילה קצרה לא תגלה שטח ריק. */
+  readonly marginPx?: number;
+  /** תקרת טווחים. מסמך פתולוגי לא יהפוך פריים אחד למאות מילישניות. */
+  readonly limit?: number;
+}
+
+const SEGMENT_MARGIN_PX = 400;
+const SEGMENT_LIMIT = 600;
+
+/**
+ * תגיות שאינן שוברות שורת טקסט — כלומר צמתים משני צידיהן מצטרפים. אלה
+ * העוטפים שסימוני העיצוב של ProseMirror מייצרים (מודגש, נטוי, קישור, כתב
+ * עילי/תחתי), בתוספת שאר ה-inline של HTML כדי שמסמך שהגיע מ-Word עם עוטף
+ * פחות שכיח לא ייחתך לשווא.
+ */
+const INLINE_TAGS: ReadonlySet<string> = new Set([
+  'SPAN', 'A', 'B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'DEL', 'INS',
+  'SUB', 'SUP', 'MARK', 'CODE', 'SMALL', 'BIG', 'TT', 'ABBR', 'CITE', 'Q',
+  'BDI', 'BDO', 'FONT', 'RUBY', 'RT', 'RP', 'VAR', 'SAMP', 'KBD', 'TIME',
+]);
+
+/** האב הראשון שאינו אלמנט inline. ראו הערת הראש — תגית, ולא סגנון מחושב. */
+function blockAncestor(element: Element, root: Element): Element {
+  let current: Element | null = element;
+  while (current && current !== root && INLINE_TAGS.has(current.tagName)) {
+    current = current.parentElement;
+  }
+  return current ?? root;
+}
+
+/** חלק אחד בקבוצה: הצומת, וההיסט שבו הוא מתחיל בטקסט המחובר. */
+interface SegmentPart {
+  readonly node: Text;
+  readonly offset: number;
+}
+
+/**
+ * מקום בתוך קבוצה ⟵ (צומת, היסט בתוכו). `null` = ההיסט מחוץ לקבוצה.
+ *
+ * `select` הוא קלט חיצוני, ולא כל מי שיכתוב אחד יחזיר טווחים בתוך הטקסט
+ * שנמסר לו. טווח שחורג פשוט מדולג — עדיף מ-`setEnd` שזורק ומפיל את מדידת
+ * כל שאר העמוד.
+ */
+function locate(parts: readonly SegmentPart[], offset: number): { node: Text; at: number } | null {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i]!;
+    if (offset >= part.offset) {
+      const at = offset - part.offset;
+      return at <= (part.node.nodeValue?.length ?? 0) ? { node: part.node, at } : null;
+    }
+  }
+  return null;
+}
+
+/** הטווחים שנבחרו בעמוד אחד, ביחס ל-`reference`. */
+function measurePageTextSegments(
+  pageEl: HTMLElement,
+  referenceBox: DOMRect,
+  select: (text: string) => readonly TextSegment[],
+  out: MeasuredSegment[],
+  limit: number,
+): void {
+  let walker: TreeWalker;
+  try {
+    walker = document.createTreeWalker(pageEl, NodeFilter.SHOW_TEXT);
+  } catch {
+    return;
+  }
+
+  let parts: SegmentPart[] = [];
+  let text = '';
+  let group: Element | null = null;
+
+  function flush(): void {
+    if (text.length > 0 && out.length < limit) {
+      for (const segment of select(text)) {
+        if (out.length >= limit) break;
+        const from = locate(parts, segment.start);
+        const to = locate(parts, segment.end);
+        if (!from || !to) continue;
+
+        let range: Range;
+        try {
+          range = document.createRange();
+          range.setStart(from.node, from.at);
+          range.setEnd(to.node, to.at);
+        } catch {
+          continue;
+        }
+
+        const rects: RawTextRect[] = [];
+        const list = range.getClientRects();
+        for (let i = 0; i < list.length; i++) {
+          const rect = list[i]!;
+          if (!(rect.width > 0) || !(rect.height > 0)) continue;
+          rects.push({
+            leftPx: rect.left - referenceBox.left,
+            topPx: rect.top - referenceBox.top,
+            widthPx: rect.width,
+            heightPx: rect.height,
+          });
+        }
+        if (rects.length > 0) out.push({ text: text.slice(segment.start, segment.end), rects });
+      }
+    }
+    parts = [];
+    text = '';
+  }
+
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const value = node.nodeValue ?? '';
+    if (value.length === 0) continue;
+
+    const parent = (node as Text).parentElement;
+    const owner = parent ? blockAncestor(parent, pageEl) : pageEl;
+    if (owner !== group) {
+      flush();
+      group = owner;
+    }
+    parts.push({ node: node as Text, offset: text.length });
+    text += value;
+  }
+  flush();
+}
+
+/**
+ * הטווחים שנבחרו בעמודים הגלויים, ביחס ל-`reference`.
+ *
+ * `select` מקבלת את הטקסט המחובר של קבוצה אחת ומחזירה טווחים בתוכו — כך
+ * המודול הזה נשאר גיאומטריה בלבד, ומי שיודע *מה* לסמן (engine/spellcheck.ts)
+ * אינו נוגע ב-DOM.
+ */
+export function measureAllPageTextSegments(
+  host: HTMLElement | null,
+  reference: HTMLElement | null,
+  select: (text: string) => readonly TextSegment[],
+  options: TextSegmentOptions = {},
+): readonly MeasuredSegment[] {
+  if (!host || !reference) return [];
+  if (typeof document === 'undefined' || typeof document.createTreeWalker !== 'function') return [];
+
+  const pages = host.querySelectorAll(`[${PAGE_INDEX_ATTRIBUTE}]`);
+  if (pages.length === 0) return [];
+
+  const margin = options.marginPx ?? SEGMENT_MARGIN_PX;
+  const limit = options.limit ?? SEGMENT_LIMIT;
+  const viewport = host.getBoundingClientRect();
+  const top = viewport.top - margin;
+  const bottom = viewport.bottom + margin;
+
+  // פעם אחת למעבר ולא פעם לכל עמוד: `getBoundingClientRect` על אלמנט שלא
+  // נגע בו כלום הוא עדיין קריאה שמכריחה פריסה, והמעבר הזה רץ בכל גלילה.
+  const referenceBox = reference.getBoundingClientRect();
+  const out: MeasuredSegment[] = [];
+
+  const ordered = Array.from(pages)
+    .filter((node): node is HTMLElement => node instanceof HTMLElement)
+    .map((el) => ({ el, pageIndex: Number(el.getAttribute(PAGE_INDEX_ATTRIBUTE)) }))
+    .filter((page) => Number.isInteger(page.pageIndex))
+    .sort((a, b) => a.pageIndex - b.pageIndex);
+
+  for (const { el } of ordered) {
+    if (out.length >= limit) break;
+    const box = el.getBoundingClientRect();
+    if (box.bottom < top || box.top > bottom) continue;
+    measurePageTextSegments(el, referenceBox, select, out, limit);
+  }
+
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* גליפים של עמוד — להצמדת לחיצה (engine/pointer-snap.ts)             */
+/* ------------------------------------------------------------------ */
+
+/** מלבני הגליפים ביחס לפינת העמוד ברגע המדידה, והעמוד עצמו — עכשיו. */
+export interface PageGlyphMeasure {
+  readonly rects: readonly RawTextRect[];
+  /** מלבן העמוד ברגע הקריאה, בקואורדינטות חלון — גלילה מזיזה אותו. */
+  pageBox(): RawTextRect;
+}
+
+/** אלמנטים מוחלפים: לחיצה עליהם היא בחירת אובייקט, לא של טקסט. */
+const REPLACED_TAGS = new Set(['IMG', 'SVG', 'CANVAS', 'VIDEO', 'PICTURE', 'OBJECT', 'IFRAME', 'EMBED']);
+
+/** התכונה שהמנוע מסמן בה לאיזה „סיפור” שייך פרגמנט: גוף, כותרת, הערה. */
+const STORY_ATTRIBUTE = 'data-layout-story';
+
+function rawBox(rect: DOMRect): RawTextRect {
+  return { leftPx: rect.left, topPx: rect.top, widthPx: rect.width, heightPx: rect.height };
+}
+
+/**
+ * מלבני הגליפים של צומת טקסט. ה-`Range` מגיע מבחוץ ומשמש מחדש: מדידת עמוד
+ * שלם עוברת על מאות צומתי טקסט, ו-`createRange` לכל אחד מהם היה מקצה מאות
+ * טווחים חיים בתוך מאזין של `mousedown`. `null` כשה-Range אינו יכול לכסות
+ * את הצומת.
+ */
+function glyphRects(node: Text, range: Range): DOMRectList | null {
+  try {
+    range.selectNodeContents(node);
+  } catch {
+    return null;
+  }
+  return typeof range.getClientRects === 'function' ? range.getClientRects() : null;
+}
+
+function pushGlyphRects(node: Text, out: RawTextRect[], origin: DOMRect, range: Range): boolean {
+  const list = glyphRects(node, range);
+  if (!list) return false;
+  let found = false;
+  for (let i = 0; i < list.length; i++) {
+    const rect = list[i]!;
+    if (!(rect.width > 0) || !(rect.height > 0)) continue;
+    found = true;
+    out.push({ leftPx: rect.left - origin.left, topPx: rect.top - origin.top, widthPx: rect.width, heightPx: rect.height });
+  }
+  return found;
+}
+
+/**
+ * האם יש תחת האלמנט טקסט מצויר — כלומר זה היקף שאפשר להצמיד אליו. יוצאת
+ * במלבן הראשון ואינה אוספת כלום: התשובה היא כן/לא.
+ */
+function hasGlyphs(element: Element, range: Range): boolean {
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if ((node.nodeValue ?? '').length === 0) continue;
+    const list = glyphRects(node as Text, range);
+    if (!list) continue;
+    for (let i = 0; i < list.length; i++) {
+      const rect = list[i]!;
+      if (rect.width > 0 && rect.height > 0) return true;
+    }
+  }
+  return false;
+}
+
+/** צומת טקסט שאינו בגוף המסמך — כותרת עליונה/תחתונה, הערה — כשהתכונה קיימת. */
+function outsideBody(node: Text): boolean {
+  const story = node.parentElement?.closest(`[${STORY_ATTRIBUTE}]`)?.getAttribute(STORY_ATTRIBUTE);
+  return typeof story === 'string' && story !== '' && story !== 'body';
+}
+
+/**
+ * מלבני הגליפים שלחיצה בנקודה מוצמדת אליהם — ראו engine/pointer-snap.ts.
+ *
+ * ההיקף נגזר מ-`target`, מטרת האירוע:
+ *
+ *   - בתוך עמוד: האלמנט הראשון במעלה העץ שיש תחתיו טקסט מצויר — השורה
+ *     שנלחצה, תא הטבלה, הפסקה. אלמנט מוחלף בדרך (תמונה) — `null`: זו
+ *     בחירת אובייקט, ואין להזיז אותה. מטרה בלי טקסט תחתיה ושאינה העמוד
+ *     עצמו (ידית, מסגרת) — גם כן `null`.
+ *   - העמוד עצמו, או אלמנט שמכסה את העמוד כולו (שכבה של המנוע, ה-host):
+ *     כל גליפי **הגוף** של העמוד שמתחת לנקודה — לא כותרות ולא הערות,
+ *     כשהמנוע מסמן אותן.
+ *   - `null` כמטרה — גרירה: העמוד שמתחת לנקודה, כל גליפי הגוף.
+ *
+ * קריאה בלבד, אותו עיגון כמו `measureAllPageRects`.
+ */
+export function measurePageGlyphs(
+  host: HTMLElement | null,
+  target: EventTarget | null,
+  xPx: number,
+  yPx: number,
+): PageGlyphMeasure | null {
+  if (!host) return null;
+  if (typeof document === 'undefined' || typeof document.createTreeWalker !== 'function') return null;
+  if (typeof document.createRange !== 'function') return null;
+  const pages = Array.from(host.querySelectorAll(`[${PAGE_INDEX_ATTRIBUTE}]`)).filter(
+    (node): node is HTMLElement => node instanceof HTMLElement,
+  );
+  if (pages.length === 0) return null;
+
+  // Range אחד לכל המדידה — ראו `glyphRects`.
+  let range: Range;
+  try {
+    range = document.createRange();
+  } catch {
+    return null;
+  }
+
+  const targetEl = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+  let page = targetEl ? (pages.find((candidate) => candidate.contains(targetEl)) ?? null) : null;
+  let scope: Element | null = null;
+
+  if (page && targetEl) {
+    if (targetEl === page) {
+      scope = page;
+    } else {
+      for (let el: Element | null = targetEl; el && el !== page; el = el.parentElement) {
+        if (REPLACED_TAGS.has(el.tagName.toUpperCase())) return null;
+        if (hasGlyphs(el, range)) {
+          scope = el;
+          break;
+        }
+      }
+      if (!scope) return null;
+    }
+  } else {
+    page = pages.find((candidate) => {
+      const box = candidate.getBoundingClientRect();
+      return xPx >= box.left && xPx <= box.right && yPx >= box.top && yPx <= box.bottom;
+    }) ?? null;
+    if (!page) return null;
+    if (targetEl && targetEl !== host) {
+      // מטרה מחוץ לעמוד שאינה מכסה אותו — פקד של המנוע מעל הדף. לא שלנו.
+      const targetBox = targetEl.getBoundingClientRect();
+      const pageBox = page.getBoundingClientRect();
+      if (
+        targetBox.left > pageBox.left + 1 ||
+        targetBox.top > pageBox.top + 1 ||
+        targetBox.right < pageBox.right - 1 ||
+        targetBox.bottom < pageBox.bottom - 1
+      ) {
+        return null;
+      }
+    }
+    scope = page;
+  }
+
+  const origin = page.getBoundingClientRect();
+  const rects: RawTextRect[] = [];
+  const bodyOnly = scope === page;
+  let walker: TreeWalker;
+  try {
+    walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+  } catch {
+    return null;
+  }
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if ((node.nodeValue ?? '').length === 0) continue;
+    if (bodyOnly && outsideBody(node as Text)) continue;
+    pushGlyphRects(node as Text, rects, origin, range);
+  }
+
+  const pageEl = page;
+  return { rects, pageBox: () => rawBox(pageEl.getBoundingClientRect()) };
+}
+
+/** שני מערכי טווחים שקולים — כדי לא לצייר מחדש מדידה שלא זזה. */
+export function sameTextSegments(a: readonly MeasuredSegment[], b: readonly MeasuredSegment[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (x.text !== y.text || !sameRawRects(x.rects, y.rects)) return false;
+  }
+  return true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1241,4 +1669,155 @@ export function applyRulerIndents(
     special,
     amountTwips: special === 'none' ? 0 : amountTwips,
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* ספירת עמודים ומילות הקצה — לכלי „שולחן העורך”                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * מספר העמודים **המצוירים**: `max(data-page-index) + 1`. `null` כשאין
+ * עמוד מצויר. זה הקירוב היחיד שיש לספירת העמודים של המסמך — למנוע אין
+ * API ציבורי לזה (docs/shulchan-source/engine-issues/3970-layout-read-api.md),
+ * ו-`totalPages` של `onPaginationUpdate` מגיע בלי התחייבות לעיתוי.
+ */
+export function countPaintedPages(host: HTMLElement | null): number | null {
+  if (!host) return null;
+  const pages = host.querySelectorAll(`[${PAGE_INDEX_ATTRIBUTE}]`);
+  let max = -1;
+  pages.forEach((node) => {
+    const index = Number(node.getAttribute(PAGE_INDEX_ATTRIBUTE));
+    if (Number.isInteger(index) && index > max) max = index;
+  });
+  return max >= 0 ? max + 1 : null;
+}
+
+/**
+ * ספירת עמודים אחרי התיישבות: המנוע מעמד מחדש א-סינכרונית אחרי מוטציה,
+ * וספירה מיידית רואה את הפריסה הקודמת. הסולם הוא `SETTLE_DELAYS_MS` של
+ * הסרגל — ונעצר מוקדם כששתי קריאות עוקבות מסכימות. הקריאה האחרונה היא
+ * התשובה; `null` כשאף פעם לא צויר עמוד.
+ */
+export async function settledPageCount(
+  host: HTMLElement | null,
+  delays: readonly number[] = SETTLE_DELAYS_MS,
+  wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<number | null> {
+  let last = countPaintedPages(host);
+  for (const delay of delays) {
+    await wait(delay);
+    const next = countPaintedPages(host);
+    if (next === last && next !== null) return next;
+    last = next;
+  }
+  return last;
+}
+
+/** מילה בקצה עמוד: הטקסט שלה והמלבנים שהיא נפרסת עליהם, ביחס ל-`reference`. */
+export interface EdgeWord {
+  text: string;
+  rects: readonly RawTextRect[];
+}
+
+/** המילה הראשונה והאחרונה של עמוד מצויר, והטקסט הפותח שלו. */
+export interface PageEdgeWords {
+  pageIndex: number;
+  /** תחילת הטקסט של העמוד (עד 200 תווים גולמיים) — לזיהוי העמוד בתצלום. */
+  head: string;
+  first: EdgeWord | null;
+  last: EdgeWord | null;
+}
+
+const HEAD_RAW_LENGTH = 200;
+
+interface TextPart {
+  node: Text;
+  offset: number;
+}
+
+function rectsOf(from: TextPart | null, to: TextPart | null, start: number, end: number, referenceBox: DOMRect): RawTextRect[] {
+  if (!from || !to) return [];
+  try {
+    const range = document.createRange();
+    range.setStart(from.node, start - from.offset);
+    range.setEnd(to.node, end - to.offset);
+    const out: RawTextRect[] = [];
+    const list = range.getClientRects();
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i]!;
+      if (!(r.width > 0) || !(r.height > 0)) continue;
+      out.push({ leftPx: r.left - referenceBox.left, topPx: r.top - referenceBox.top, widthPx: r.width, heightPx: r.height });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function partAt(parts: readonly TextPart[], offset: number): TextPart | null {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i]!;
+    if (offset >= part.offset) return part;
+  }
+  return null;
+}
+
+/**
+ * המילה הראשונה והאחרונה בכל עמוד מצויר — ל„סימון עמודים” של שולחן העורך.
+ *
+ * הטקסט של העמוד נקרא ב-`TreeWalker` על צמתי הטקסט שלו, בסדר המסמך (זה
+ * כולל כותרת/כותרת תחתונה ומספרי עמוד אם הם צמתי טקסט — הקירוב מתועד
+ * ב-engine/shulchan/page-marking.ts). „מילה” = רצף תווים שאינם רווח.
+ * קריאה בלבד, אותו עיגון כמו `measureAllPageRects`.
+ */
+export function measurePageEdgeWords(
+  host: HTMLElement | null,
+  reference: HTMLElement | null,
+): readonly PageEdgeWords[] {
+  if (!host || !reference) return [];
+  if (typeof document === 'undefined' || typeof document.createTreeWalker !== 'function') return [];
+  const pages = host.querySelectorAll(`[${PAGE_INDEX_ATTRIBUTE}]`);
+  if (pages.length === 0) return [];
+  const referenceBox = reference.getBoundingClientRect();
+
+  const ordered = Array.from(pages)
+    .filter((node): node is HTMLElement => node instanceof HTMLElement)
+    .map((el) => ({ el, pageIndex: Number(el.getAttribute(PAGE_INDEX_ATTRIBUTE)) }))
+    .filter((page) => Number.isInteger(page.pageIndex))
+    .sort((a, b) => a.pageIndex - b.pageIndex);
+
+  const out: PageEdgeWords[] = [];
+  for (const { el, pageIndex } of ordered) {
+    let walker: TreeWalker;
+    try {
+      walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    } catch {
+      continue;
+    }
+    const parts: TextPart[] = [];
+    let text = '';
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const value = node.nodeValue ?? '';
+      if (value.length === 0) continue;
+      parts.push({ node: node as Text, offset: text.length });
+      text += value;
+    }
+
+    const firstMatch = /\S+/.exec(text);
+    const lastMatch = /\S+\s*$/.exec(text);
+    const edge = (match: RegExpExecArray | null): EdgeWord | null => {
+      if (!match) return null;
+      const word = match[0].trim();
+      const start = match.index;
+      const end = start + word.length;
+      return { text: word, rects: rectsOf(partAt(parts, start), partAt(parts, Math.max(start, end - 1)), start, end, referenceBox) };
+    };
+    out.push({
+      pageIndex,
+      head: text.slice(0, HEAD_RAW_LENGTH),
+      first: edge(firstMatch),
+      last: edge(lastMatch),
+    });
+  }
+  return out;
 }

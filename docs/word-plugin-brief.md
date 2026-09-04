@@ -47,8 +47,8 @@ SuperDoc ענו במפורש ([issue #3927](https://github.com/superdoc/docx-edi
 - **אין `<script type="module">`** — WebView2 ב־Windows לא תומך בזה מ־`file://`. הבנייה חייבת להיות bundle קלאסי (IIFE/UMD) דרך Vite/esbuild/Rollup.
 - **הכול מקומי** — אין CDN ואין רשת. גם קבצי ה־Workers של המנוע מועתקים לתוך התוסף (בדיוק כמו `superdoc-timeline` שמעתיק אותם ל־`public/`).
 - **טלמטריה כבויה** (`telemetry.enabled: false`).
-- פתיחת קובץ: `Otzaria.call('fs.pickUserFile', { extensions: ['docx'] })` → `{ token, url, name, size }`; ה־`url` נמסר ישירות ל־SuperDoc בלי להעביר בייטים בגשר ה־JS. ה־`token` נשמר, ובהפעלה הבאה `fs.resolveFileUrl`.
-- **שמירה**: ה־SDK כיום חסר API לכתיבת קובץ בינארי (`fs.saveUserFile`) — באחריות צד המארח, מטופל בנפרד.
+- פתיחת קובץ: `Otzaria.call('fs.pickUserFile', { extensions: ['docx', 'docm'] })` → `{ token, url, name, size }`; ה־`url` נמסר ישירות ל־SuperDoc בלי להעביר בייטים בגשר ה־JS. ה־`token` נשמר, ובהפעלה הבאה `fs.resolveFileUrl`.
+- **שמירה**: *(נסגר מאז. ה־SDK מספק כתיבה בינארית בשלושה שלבים —`fs.beginBinaryWrite`, `fs.commitUserFileWrite`, `fs.abortBinaryWrite` — ולא ב־`fs.saveUserFile` כפי שנוסח כאן. בשימוש ב־`src/host/files.ts`, תחת ההרשאה `fs.user_files.write` שבמניפסט.)*
 - React אינו חובה; הוא רק מקל על תחזוקת Ribbon מורכב.
 
 ## 5. מה עושים עם התוסף הקיים (v1.3.5)

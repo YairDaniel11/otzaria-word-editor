@@ -9,7 +9,7 @@
  */
 import { call, tryCall, isPermissionDenied } from './otzaria-client';
 import { bytesToBase64 } from './base64';
-import { DOCX_MIME } from '../engine/export';
+import { DOCX_MIME, type WordExtension } from '../engine/export';
 import { EMBEDDABLE_IMAGE_EXTENSIONS, imageMimeForFileName } from '../engine/payloads';
 
 export interface UserFile {
@@ -40,7 +40,12 @@ export async function pickDocxFile(
 
   const request = async (mode: 'read' | 'readwrite'): Promise<UserFile | null> => {
     const res = await call<PickResponse>('fs.pickUserFile', {
-      extensions: ['docx'],
+      // `docm` ולא רק `docx`: מסמך עם מאקרו הוא אותה חבילת OOXML בדיוק, והוא
+      // נפתח ונערך כאן כמו כל מסמך אחר — המאקרו עצמם אינם מורצים (אין מנוע
+      // VBA בדפדפן) אבל נשמרים כמות שהם, ואפשר לראות את הקוד שלהם ב-Alt+F8.
+      // בלי הסיומת הזאת הקובץ פשוט לא הופיע בבורר, ולמשתמש לא הייתה שום דרך
+      // לפתוח את המסמך שהוא עובד עליו שנים.
+      extensions: ['docx', 'docm'],
       access: mode,
       ...(title ? { title } : {}),
     });
@@ -205,15 +210,93 @@ export async function beginBinaryWrite(expectedSize: number): Promise<WriteTicke
 }
 
 /**
+ * אבחון חד-פעמי לכשל רשת בהעלאה („Failed to fetch”).
+ *
+ * „Failed to fetch” הוא כל מה שהדפדפן אומר, והוא מכסה שני עולמות שונים
+ * לגמרי: שרת ה-loopback אינו נגיש בכלל, או שדווקא ה-PUT נחסם (שער בקשות
+ * של ה-WebView, preflight שנכשל). ההבחנה נמדדת: GET לנתיב קובץ של השרת.
+ * אם ה-GET עובר (כל סטטוס HTTP הוא הוכחת נגישות) — הבעיה ב-PUT עצמו; אם
+ * גם הוא נופל — השרת אינו נגיש מהדף.
+ *
+ * למה `/f/probe` ולא השורש: שער ה-WebView של אוצריא מאשר לתוסף רק נתיבי
+ * `/f/` (ובגרסאות שלפני התיקון של `/w/` — רק אותם), ו-GET לשורש היה נחסם
+ * באותו שער בדיוק כמו ה-PUT, כך ששני המקרים היו נראים „השרת אינו נגיש”.
+ * token שאינו קיים מחזיר 404 מהשרת עצמו — וזו ההוכחה שהוא נגיש.
+ *
+ * הבדיקה עצמה נעשית פעם אחת לכל חיי הדף: שמירה אוטומטית רצה כל כמה שניות,
+ * ובדיקה בכל כשל הייתה מציפה את הלוג ואת השרת. **הממצא, לעומת זאת, מוצמד
+ * לכל כשל.** קודם עמד כאן דגל בוליאני, ולכן הכשל השני והלאה קיבל „העלאת
+ * המסמך נכשלה: Failed to fetch” חשוף — אותה תקלה בדיוק, בהודעה שאינה אומרת
+ * דבר, ותלוי רק בשאלה אם זה הניסיון הראשון. צילום מסך של שורת המצב הוא ערוץ
+ * הדיווח בפועל, ולכן הממצא חייב להיות בו בכל פעם.
+ *
+ * מה נשמר בין כשלים הוא רק מה שקבוע לכל חיי הדף: תוצאת ה-GET, המסקנה ממנה
+ * (`blockedByHost`) וה-`דף`. ה-`יעד` **אינו** נשמר ומורכב מחדש בכל כשל, כי
+ * לכל שמירה יש `uploadUrl` משלה — write-token אחר, ולעיתים מסמך אחר לגמרי.
+ * כששמרנו את מחרוזת האבחון כולה, שורת המצב של הכשל החמישי הציגה את היעד של
+ * הכשל הראשון; ומכיוון שצילום המסך הוא הדיווח, זה שלח את המפתח לרדוף אחרי
+ * כתיבה ל-token ישן שמעולם לא קרתה.
+ */
+interface UploadProbe {
+  /** הדף שממנו יצא ה-PUT. */
+  page: string;
+  /** תיאור תוצאת ה-GET — הוכחת נגישות, או הכשל שלה. */
+  probe: string;
+  /** השרת נגיש ודווקא ה-PUT נחסם, כלומר שער הבקשות של אוצריא. */
+  blockedByHost: boolean;
+}
+
+let uploadProbe: Promise<UploadProbe> | undefined;
+
+async function uploadFailureDetail(uploadUrl: string): Promise<string> {
+  uploadProbe ??= probeUploadHost(uploadUrl);
+  const { page, probe, blockedByHost } = await uploadProbe;
+  const detail = `דף=${page}, יעד=${uploadUrl}, ${probe}`;
+  // שרת נגיש ו-PUT חסום פירושו שער הבקשות של אוצריא, ולא תקלת רשת: התוסף
+  // אינו יכול לעקוף אותו, ולכן ההודעה אומרת מה כן אפשר לעשות.
+  const advice = blockedByHost ? ' — גרסת אוצריא הזאת חוסמת את כתיבת המסמך; נדרש עדכון' : '';
+  return `${advice} [${detail}]`;
+}
+
+async function probeUploadHost(uploadUrl: string): Promise<UploadProbe> {
+  let probe: string;
+  let blockedByHost = false;
+  try {
+    const origin = new URL(uploadUrl).origin;
+    const res = await fetch(`${origin}/f/probe`, { method: 'GET' });
+    probe = `GET לשרת עבר (${res.status}) — ה-PUT עצמו נחסם`;
+    blockedByHost = true;
+  } catch (probeError) {
+    probe = `גם GET לשרת נכשל (${
+      probeError instanceof Error ? probeError.message : String(probeError)
+    }) — השרת אינו נגיש מהדף`;
+  }
+
+  const page = window.location.origin || window.location.protocol;
+  // לוג אחד לכל חיי הדף, כמו הבדיקה עצמה — שמירה אוטומטית שנכשלת שוב ושוב
+  // הייתה מציפה אותו. ה-`יעד` אינו כאן דווקא משום שהוא משתנה בין כשל לכשל:
+  // הוא נמצא בהודעת השגיאה של כל כשל בנפרד.
+  console.error('[otzaria-word] אבחון כשל העלאה:', `דף=${page}, ${probe}`);
+  return { page, probe, blockedByHost };
+}
+
+/**
  * שולחת את הבייטים ב-PUT יחיד. לא עוברת בגשר — `fetch` ישירות לשרת ה-loopback.
  * `keepalive` אינו בשימוש בכוונה: הוא מוגבל לגוף קטן, וכאן מדובר במסמך.
  */
 export async function uploadBytes(uploadUrl: string, blob: Blob): Promise<void> {
-  const response = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': blob.type || DOCX_MIME },
-    body: blob,
-  });
+  let response: Response;
+  try {
+    response = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': blob.type || DOCX_MIME },
+      body: blob,
+    });
+  } catch (error) {
+    // TypeError של fetch: הבקשה לא הגיעה לשרת בכלל. ראו uploadFailureDetail.
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`העלאת המסמך נכשלה: ${reason}${await uploadFailureDetail(uploadUrl)}`);
+  }
   if (!response.ok) {
     throw new Error(`העלאת המסמך נכשלה (${response.status})`);
   }
@@ -238,17 +321,30 @@ export interface CommitOptions {
   targetToken?: string;
   suggestedName?: string;
   title?: string;
+  /**
+   * הסיומת שהמאחז מצמיד לשם בדיאלוג „שמור בשם”, ושלפיה הוא מסנן בו.
+   *
+   * לא קבוע `docx`: המאחז מצמיד את הסיומת לשם **אלא אם** הוא כבר מסתיים בה,
+   * ולכן `docx` קבוע על מסמך מאקרו הציע לשמור את `ספר.docm` בשם
+   * `ספר.docm.docx` — ועוד סינן את הדיאלוג ל-`docx`. כלומר בדיוק החבילה
+   * עם `vbaProject` שנושאת שם `.docx` שאותה יש להימנע ממנה.
+   * ראו `resolveSaveExtension` ב-engine/export.ts.
+   *
+   * `txt` — ייצוא לפורמט ספר של אוצריא (engine/otzaria-book.ts), שעובר
+   * באותו מסלול שמירה בדיוק.
+   */
+  extension?: WordExtension | 'txt';
 }
 
 /** כותבת את ההעלאה לקובץ. `cancelled` פירושו שהמשתמש סגר את „שמור בשם”. */
 export async function commitUserFileWrite(options: CommitOptions): Promise<CommitResult> {
-  const { writeToken, targetToken, suggestedName, title } = options;
+  const { writeToken, targetToken, suggestedName, title, extension } = options;
   const res = await call<CommitResult>('fs.commitUserFileWrite', {
     writeToken,
     ...(targetToken ? { targetToken } : {}),
     ...(suggestedName ? { suggestedName } : {}),
     ...(title ? { title } : {}),
-    extension: 'docx',
+    extension: extension ?? 'docx',
   });
   if (!res) throw new Error('השמירה לא הושלמה');
   if (res.cancelled) return { cancelled: true };

@@ -10,23 +10,35 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  DRAFT_PATH,
   SESSION_VERSION,
+  activeEntry,
   decideDraftRecovery,
   defaultView,
   documentViewFor,
   draftAgeLabel,
+  draftPathFor,
+  emptyDocumentEntry,
   emptySession,
   normalizeSession,
+  sessionForEntry,
   sessionFromLastDocument,
+  withActiveEntry,
   type SessionDraft,
   type SessionState,
 } from '../../src/sessions/session-state';
 
 const anchor = { start: { blockId: 'b7', ordinal: 4, offset: 12 }, end: null };
 
-function session(patch: Partial<SessionState> = {}): SessionState {
-  return { ...emptySession(), ...patch };
+/** רשומה עם מסמך פעיל אחד, בטלאי — כמו הרשומה היחידה של הצורה הישנה. */
+function session(patch: Partial<{
+  document: SessionState['documents'][number]['document'];
+  view: SessionState['view'];
+  caret: SessionState['documents'][number]['caret'];
+  draft: SessionDraft | null;
+}> = {}): SessionState {
+  const { view, ...entryPatch } = patch;
+  const base = withActiveEntry(emptySession(), entryPatch);
+  return view ? { ...base, view } : base;
 }
 
 describe('normalizeSession', () => {
@@ -35,7 +47,7 @@ describe('normalizeSession', () => {
       document: { token: 'tok', name: 'א.docx', writable: true },
       view: { zoom: 150, focusMode: true, ribbonTab: 'references', ribbonCollapsed: true },
       caret: anchor,
-      draft: { path: DRAFT_PATH, savedAt: 17, documentToken: 'tok', sourceSize: 900 },
+      draft: { path: draftPathFor('tok'), savedAt: 17, documentToken: 'tok', sourceSize: 900 },
     });
 
     expect(normalizeSession(JSON.parse(JSON.stringify(stored)))).toEqual(stored);
@@ -49,34 +61,69 @@ describe('normalizeSession', () => {
   });
 
   it('שדה פגום מתאפס ואינו פוסל את שאר הרשומה', () => {
-    // חמישה דברים בלתי תלויים ברשומה אחת: לשונית פגומה אינה סיבה לאבד את
-    // המסמך ואת הטיוטה.
+    // ארבעה דברים בלתי תלויים ברשומת מסמך אחת: לשונית פגומה אינה סיבה לאבד
+    // את המסמך ואת הטיוטה.
     const read = normalizeSession({
       version: SESSION_VERSION,
-      document: { token: 'tok' },
+      documents: [{ id: 'd1', document: { token: 'tok' }, caret: { start: { blockId: '', offset: 3 } }, draft: { savedAt: 5 } }],
+      activeId: 'd1',
       view: { zoom: -4, focusMode: 'כן', ribbonTab: 42 },
-      caret: { start: { blockId: '', offset: 3 } },
-      draft: { savedAt: 5 },
     });
 
     expect(read).toEqual({
       version: SESSION_VERSION,
-      document: { token: 'tok', name: 'מסמך', writable: false },
+      documents: [{ id: 'd1', document: { token: 'tok', name: 'מסמך', writable: false }, caret: null, draft: null }],
+      activeId: 'd1',
       view: defaultView(),
-      caret: null,
-      draft: null,
     });
+  });
+
+  it('רשומת מסמך בלי id נשמטת, ו-activeId שלא נפתר נופל לרשומה שנשארה', () => {
+    const read = normalizeSession({
+      version: SESSION_VERSION,
+      documents: [{ document: { token: 'no-id' } }, { id: 'd2', document: { token: 'tok' } }],
+      activeId: 'missing',
+      view: defaultView(),
+    });
+
+    expect(read?.documents).toHaveLength(1);
+    expect(read?.activeId).toBe('d2');
+  });
+
+  it('מזהה שחוזר פעמיים נשמט — טאב אינו יכול לחלוק זהות עם אחר', () => {
+    // המזהה קובע את נתיב הטיוטה ואת המקום במפת הטאבים: שני טאבים עליו היו
+    // דורסים זה את הטיוטה של זה, והשני היה מותיר פאנל יתום במסך.
+    const read = normalizeSession({
+      version: SESSION_VERSION,
+      documents: [
+        { id: 'd1', document: { token: 'א' } },
+        { id: 'd1', document: { token: 'ב' } },
+        { id: 'd2', document: { token: 'ג' } },
+      ],
+      activeId: 'd2',
+      view: defaultView(),
+    });
+
+    expect(read?.documents.map((entry) => entry.id)).toEqual(['d1', 'd2']);
+    expect(read?.documents[0]?.document?.token, 'הראשון נשמר, הכפילות נשמטת').toBe('א');
+    expect(read?.activeId).toBe('d2');
   });
 
   it('היסט וסדר שליליים נקראים כערכים חוקיים ולא כפגם', () => {
     const read = normalizeSession({
-      ...emptySession(),
-      caret: { start: { blockId: 'b1', ordinal: -2, offset: -9 }, end: null },
+      ...session(),
+      documents: session().documents.map((entry) => ({
+        ...entry,
+        caret: { start: { blockId: 'b1', ordinal: -2, offset: -9 }, end: null },
+      })),
     });
 
     // סדר שלילי אינו מקום בסדר המסמך, ולכן הוא „לא ידוע”; היסט שלילי נקצץ
     // לתחילת הפסקה, שהוא המקום היחיד שאפשר לפרש אותו בו.
-    expect(read?.caret).toEqual({ start: { blockId: 'b1', ordinal: null, offset: 0 }, end: null });
+    expect(activeEntry(read)?.caret).toEqual({
+      start: { blockId: 'b1', ordinal: null, offset: 0 },
+      end: null,
+    });
   });
 });
 
@@ -84,8 +131,8 @@ describe('sessionFromLastDocument', () => {
   it('משתמש שמעדכן מגרסה קודמת אינו מאבד את המסמך שעבד עליו', () => {
     const migrated = sessionFromLastDocument({ token: 'tok', name: 'ב.docx', writable: false });
 
-    expect(migrated?.document).toEqual({ token: 'tok', name: 'ב.docx', writable: false });
-    expect(migrated?.caret, 'אין מה לדעת על הסמן מגרסה שלא שמרה אותו').toBeNull();
+    expect(activeEntry(migrated)?.document).toEqual({ token: 'tok', name: 'ב.docx', writable: false });
+    expect(activeEntry(migrated)?.caret, 'אין מה לדעת על הסמן מגרסה שלא שמרה אותו').toBeNull();
   });
 
   it('אין מסמך קודם — אין רשומה', () => {
@@ -121,7 +168,7 @@ describe('documentViewFor', () => {
 
 describe('decideDraftRecovery', () => {
   const draft: SessionDraft = {
-    path: DRAFT_PATH,
+    path: draftPathFor('tok'),
     savedAt: 100,
     documentToken: 'tok',
     sourceSize: 5_000,
@@ -211,5 +258,42 @@ describe('גיל הטיוטה', () => {
     expect(draftAgeLabel(0, now)).toBeNull();
     expect(draftAgeLabel(now + 60_000, now)).toBeNull();
     expect(draftAgeLabel(Number.NaN, now)).toBeNull();
+  });
+});
+
+describe('activeEntry / withActiveEntry', () => {
+  it('withActiveEntry מוסיפה רשומה כשאין עדיין אחת פעילה', () => {
+    const empty: SessionState = { version: SESSION_VERSION, documents: [], activeId: null, view: defaultView() };
+    const next = withActiveEntry(empty, { document: { token: 't', name: 'שם', writable: true } });
+
+    expect(next.documents).toHaveLength(1);
+    expect(activeEntry(next)?.document?.token).toBe('t');
+  });
+
+  it('draftPathFor מייצרת נתיב שונה לכל מזהה מסמך', () => {
+    expect(draftPathFor('a')).not.toBe(draftPathFor('b'));
+  });
+});
+
+describe('sessionForEntry', () => {
+  it('הרשומה שטאב מחזיק לעצמו היא הרשומה שלו בלבד, והיא הפעילה בה', () => {
+    // בלי זה כל טאב היה מחזיק עותק של האוסף כולו, וסגירת טאב לא הייתה מוחקת
+    // אותו: העותק שאצל השכן היה מחזיר אותו בעלייה הבאה.
+    const entry = { ...emptyDocumentEntry('doc-7'), document: { token: 't', name: 'ז.docx', writable: true } };
+    const state = sessionForEntry(entry, { ...defaultView(), zoom: 130 });
+
+    expect(state.documents).toEqual([entry]);
+    expect(state.activeId).toBe('doc-7');
+    expect(activeEntry(state)).toBe(entry);
+    expect(state.version).toBe(SESSION_VERSION);
+  });
+
+  it('מצב התצוגה מועתק ואינו משותף בין טאבים', () => {
+    const view = defaultView();
+    const state = sessionForEntry(emptyDocumentEntry('doc-1'), view);
+
+    state.view.zoom = 200;
+
+    expect(view.zoom, 'שינוי אצל טאב אחד אינו זולג לשני').toBeNull();
   });
 });

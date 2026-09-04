@@ -7,8 +7,10 @@
       :value="modelValue"
       class="ribbon-select"
       :disabled="disabled"
-      :title="menuString(title)"
-      @change="$emit('update:modelValue', ($event.target as HTMLSelectElement).value)"
+      :data-tip-title="menuString(title)"
+      :aria-label="menuString(title)"
+      @change="onChange"
+      @keydown.escape="onEscape"
     >
       <option
         v-for="opt in options"
@@ -28,6 +30,10 @@
 </template>
 
 <script setup lang="ts">
+import { inject, shallowRef } from 'vue';
+import type { SuperDoc } from 'superdoc';
+import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
+import { focusDocument } from '../../../engine/focus';
 import SvgIcon from '../../icons/SvgIcon.vue';
 import { menuString } from '../i18n';
 
@@ -59,9 +65,31 @@ withDefaults(
   }
 );
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'update:modelValue', val: string): void;
 }>();
+
+const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
+
+/**
+ * אחרי בחירה המיקוד חוזר למסמך — בכל פקד `<select>` ברצועה, גם כשהערך הוא
+ * אפשרות של כלי (סוג הסוגריים בלשונית „שולחן העורך") ולא עיצוב: כך נוהגת
+ * הרצועה של Word, ובלי זה ההקלדה הבאה נבלעת בפקד (issue #14 א׳).
+ */
+function onChange(event: Event): void {
+  const target = event.target as HTMLSelectElement;
+  emit('update:modelValue', target.value);
+  target.blur();
+  focusDocument(superdoc.value);
+}
+
+function onEscape(event: KeyboardEvent): void {
+  // כמו ב-RibbonCombo: המקש נבלע כאן ואינו מגיע למאזין הקיצורים הגלובלי.
+  event.stopPropagation();
+  const target = event.target as HTMLSelectElement;
+  target.blur();
+  focusDocument(superdoc.value);
+}
 </script>
 
 <style scoped>
@@ -81,7 +109,7 @@ defineEmits<{
   color: var(--color-on-surface);
   font-family: var(--font-main);
   font-size: 11px;
-  height: 22px;
+  height: var(--ribbon-row-h);
   padding-inline-start: 6px;
   padding-inline-end: 18px;
   width: 100%;

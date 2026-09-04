@@ -50,20 +50,14 @@
         :disabled="!linkCmd.enabled.value"
         @click="$emit('open-link')"
       />
-      <!-- גל 22: „הסר קישור" — hyperlinks.remove על הטווח המסומן. -->
-      <RibbonButton
-        icon="link"
-        label="הסר קישור"
-        variant="large"
-        tooltip="הסרת ההיפר-קישור מהטקסט המסומן (הטקסט נשמר)"
-        :disabled="removeLinkInFlight"
-        @click="onRemoveHyperlink"
-      />
-
       <!--
         „סימנייה” יושבת כאן מפני שזה מקומה ב-Word העברי: הפקד השני בקבוצה
         „קישורים” של לשונית „הוספה”, ליד „קישור” ו„הפניה מקושרת”. הפקד
         השלישי אינו כאן — ראו engine/cross-refs.ts.
+
+        ולכן היא גם נשארה **גדולה** כששאר הלשוניות עברו לדפוס „ראשי + מחסנית”:
+        שלושת הפקדים האלה הם שווים ב-Word, ו„ליד” בהערה שלמעלה הוא טענה על
+        המקום, לא רק על הקבוצה.
       -->
       <RibbonButton
         icon="bookmark"
@@ -73,6 +67,20 @@
         :disabled="!can('canManageBookmarks')"
         @click="onOpenBookmarkDialog"
       />
+
+      <!-- גל 22: „הסר קישור" — hyperlinks.remove על הטווח המסומן.
+           הוא שיורד למחסנית ולא „סימנייה”: ל-Word אין פקד „הסר קישור” ברצועה
+           בכלל (הוא בתפריט ההקשר), ולכן הוא המשני מבין השלושה. -->
+      <RibbonStack>
+        <RibbonButton
+          icon="link"
+          label="הסר קישור"
+          variant="small"
+          tooltip="הסרת ההיפר-קישור מהטקסט המסומן (הטקסט נשמר)"
+          :disabled="removeLinkInFlight"
+          @click="onRemoveHyperlink"
+        />
+      </RibbonStack>
     </RibbonGroup>
 
     <!-- קבוצה 5: כותרת עליונה ותחתונה -->
@@ -93,30 +101,15 @@
         :items="footerItems"
         @select="onFooterAction"
       />
-      <RibbonButton
-        icon="firstPageHeader"
-        label="שונה בעמוד ראשון"
-        variant="large"
-        :tooltip="tip('canSetTitlePage', 'לעמוד הראשון תהיה כותרת משלו')"
-        :disabled="!can('canSetTitlePage')"
-        :active="headerFooter.titlePage"
-        @click="onToggleTitlePage"
-      />
-      <RibbonButton
-        icon="oddEvenPages"
-        label="שונה בעמודים זוגיים ואי-זוגיים"
-        variant="large"
-        :tooltip="tip('canSetOddEvenHeaders', 'כותרת אחת לעמודים הזוגיים ואחרת לאי-זוגיים')"
-        :disabled="!can('canSetOddEvenHeaders')"
-        :active="headerFooter.oddEven"
-        @click="onToggleOddEven"
-      />
       <!--
         „מספר עמוד” יושב כאן ולא בקבוצה משלו מפני שזה מקומו ב-Word העברי:
-        הוא הפקד הרביעי בקבוצה „כותרת עליונה ותחתונה”, מפני ששם מספרי העמודים
+        הוא הפקד השלישי בקבוצה „כותרת עליונה ותחתונה”, מפני ששם מספרי העמודים
         חיים בפועל. השדה עצמו נכנס **במקום הסמן** ולא בכותרת התחתונה — אין
         API ציבורי שמזיז את הסמן ל-story אחר (ראו הערת הכותרות למטה) — וזה מה
         שה-tooltip אומר.
+
+        („הרביעי” שנכתב כאן קודם לא היה נכון: בתבנית הוא היה החמישי, אחרי שני
+        המתגים שירדו מאז למחסנית שלצד. עכשיו הוא באמת השלישי, כמו ב-Word.)
       -->
       <RibbonMenuButton
         icon="pageNumber"
@@ -126,15 +119,44 @@
         :items="pageNumberItems"
         @select="onPageNumberAction"
       />
-      <RibbonButton
-        icon="link"
-        label="קשר לקודם"
-        variant="large"
-        :tooltip="linkToPreviousTooltip"
-        :disabled="!can('canLinkToPrevious') || headerFooter.sectionCount < 2"
-        :active="headerFooter.linkedToPrevious"
-        @click="onToggleLinkToPrevious"
-      />
+
+      <!--
+        שלושת המתגים, במחסנית לצד שלושת הפקדים הראשיים. ב-Word הם אינם כפתורי
+        ענק אלא תיבות סימון קטנות בקבוצה „אפשרויות” של לשונית ההקשר של
+        הכותרות, וזה בדיוק מה שהם: אפשרויות של הכותרת, לא פעולות הוספה.
+
+        זה גם מה שמחזיר את הקבוצה לרוחב סביר — „שונה בעמודים זוגיים
+        ואי-זוגיים” ככפתור גדול מתח משבצת על רוחב של שלוש.
+      -->
+      <RibbonStack>
+        <RibbonButton
+          icon="firstPageHeader"
+          label="שונה בעמוד ראשון"
+          variant="small"
+          :tooltip="tip('canSetTitlePage', 'לעמוד הראשון תהיה כותרת משלו')"
+          :disabled="!can('canSetTitlePage')"
+          :active="headerFooter.titlePage"
+          @click="onToggleTitlePage"
+        />
+        <RibbonButton
+          icon="oddEvenPages"
+          label="שונה בעמודים זוגיים ואי-זוגיים"
+          variant="small"
+          :tooltip="tip('canSetOddEvenHeaders', 'כותרת אחת לעמודים הזוגיים ואחרת לאי-זוגיים')"
+          :disabled="!can('canSetOddEvenHeaders')"
+          :active="headerFooter.oddEven"
+          @click="onToggleOddEven"
+        />
+        <RibbonButton
+          icon="link"
+          label="קשר לקודם"
+          variant="small"
+          :tooltip="linkToPreviousTooltip"
+          :disabled="!can('canLinkToPrevious') || headerFooter.sectionCount < 2"
+          :active="headerFooter.linkedToPrevious"
+          @click="onToggleLinkToPrevious"
+        />
+      </RibbonStack>
     </RibbonGroup>
 
     <!--
@@ -142,7 +164,8 @@
       „הוספה”, בין „חלקים מהירים” ל„אובייקט” — ו„חלקים מהירים” הוא גם המקום
       שממנו נפתח „שדה…”. „עדכן שדות” אינו פקד ברצועה של Word אלא F9 ותפריט
       הקשר, ואין לו בית טבעי; הוא ממוקם כאן מפני שזו הקבוצה שהשדות נכנסים
-      ממנה, וכי „עדכן” ליד „הוסף” הוא הצמד שהמשתמש צריך.
+      ממנה, וכי „עדכן” לצד „הוסף” הוא הצמד שהמשתמש צריך — במחסנית שלצד הפקד
+      הראשי, כי הוא מתחזק ואינו מוסיף.
     -->
     <RibbonGroup title="טקסט">
       <RibbonButton
@@ -153,14 +176,16 @@
         :disabled="!can('canInsertField')"
         @click="onInsertDate"
       />
-      <RibbonButton
-        icon="updateFields"
-        label="עדכן שדות"
-        variant="large"
-        :tooltip="rebuildTooltip"
-        :disabled="!can('canRebuildFields')"
-        @click="onRebuildFields"
-      />
+      <RibbonStack>
+        <RibbonButton
+          icon="updateFields"
+          label="עדכן שדות"
+          variant="small"
+          :tooltip="rebuildTooltip"
+          :disabled="!can('canRebuildFields')"
+          @click="onRebuildFields"
+        />
+      </RibbonStack>
     </RibbonGroup>
 
     <!-- קבוצה 7: תוכן עניינים -->
@@ -260,6 +285,7 @@
 import { computed, inject, onUnmounted, ref, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
+import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import RibbonMenuButton from '../common/RibbonMenuButton.vue';
 import TablePicker from '../common/TablePicker.vue';

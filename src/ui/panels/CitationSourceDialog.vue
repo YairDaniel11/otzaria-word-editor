@@ -14,7 +14,8 @@
         <button
           type="button"
           class="cs-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את ניהול המקורות"
           @click="$emit('close')"
         >

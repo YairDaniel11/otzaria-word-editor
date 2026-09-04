@@ -52,7 +52,19 @@ const PASTE: Shortcut = {
   native: true,
 };
 
-const ALL = [BOLD, SAVE, ESCAPE, PASTE];
+/** פעולת מעטפת עם payload — רשומת `tab-goto` היא המקרה האמיתי. */
+const TAB_GOTO: Shortcut = {
+  id: 'tab-goto-3',
+  label: 'Alt+3',
+  description: 'מעבר לטאב השלישי',
+  group: 'tabs',
+  code: 'Digit3',
+  alt: true,
+  action: 'tab-goto',
+  payload: 3,
+};
+
+const ALL = [BOLD, SAVE, ESCAPE, PASTE, TAB_GOTO];
 
 /** יעד מזויף למאזין, כדי שהבדיקה תוכל לוודא שהוא נרשם ושהוא נותק. */
 function fakeTarget() {
@@ -165,7 +177,16 @@ describe('המנתב', () => {
     const { dispatcher, runAction } = setup();
 
     expect(dispatcher.handle(event({ code: 'KeyS', ctrlKey: true }))).toBe(true);
-    expect(runAction).toHaveBeenCalledWith('save');
+    expect(runAction).toHaveBeenCalledWith('save', undefined);
+  });
+
+  it('פעולת מעטפת מקבלת את ה-payload של הרשומה', () => {
+    // בלי זה שמונה רשומות `Alt+1`…`Alt+8` היו מריצות את אותה פעולה בלי שום
+    // דרך לדעת לאיזה טאב לעבור — כלומר כולן היו עוברות לאותו אחד.
+    const { dispatcher, runAction } = setup();
+
+    expect(dispatcher.handle(event({ code: 'Digit3', altKey: true }))).toBe(true);
+    expect(runAction).toHaveBeenCalledWith('tab-goto', 3);
   });
 
   it('צירוף לא מוכר אינו נבלע', () => {
@@ -204,8 +225,8 @@ describe('המנתב', () => {
       true,
     );
     expect(dispatcher.handle(event({ code: 'Escape', target: element('input') }))).toBe(true);
-    expect(runAction).toHaveBeenNthCalledWith(1, 'save');
-    expect(runAction).toHaveBeenNthCalledWith(2, 'escape');
+    expect(runAction).toHaveBeenNthCalledWith(1, 'save', undefined);
+    expect(runAction).toHaveBeenNthCalledWith(2, 'escape', undefined);
   });
 
   it('אזור המסמך אינו חוסם — הקיצורים עובדים בתוכו', () => {
@@ -231,7 +252,7 @@ describe('המנתב', () => {
     expect(dispatcher.handle(event({ code: 'KeyS', ctrlKey: true }))).toBe(false);
     expect(dispatcher.handle(event({ code: 'Escape' }))).toBe(true);
     expect(runCommand).not.toHaveBeenCalled();
-    expect(runAction).toHaveBeenCalledExactlyOnceWith('escape');
+    expect(runAction).toHaveBeenCalledExactlyOnceWith('escape', undefined);
   });
 
   it('נרשם ליעד ומנותק ב-dispose', () => {

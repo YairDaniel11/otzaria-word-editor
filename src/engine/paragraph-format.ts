@@ -135,7 +135,14 @@ export interface ParagraphFormatDocumentApi extends SelectionDocumentApi {
   };
   get?: () => MaybePromise<unknown>;
   blocks?: {
-    list?: () => MaybePromise<{ blocks?: readonly { nodeId?: string; nodeType?: string }[] } | undefined>;
+    list?: () => MaybePromise<
+      { blocks?: readonly { nodeId?: string; nodeType?: string }[] } | undefined
+    >;
+  };
+  lists?: {
+    getState?: (input: {
+      target: { kind: 'block'; nodeType: 'paragraph' | 'listItem'; nodeId: string };
+    }) => MaybePromise<{ success?: boolean; isListItem?: boolean } | undefined>;
   };
 }
 
@@ -157,27 +164,47 @@ export interface ParagraphTarget {
 }
 
 /**
- * סוג הבלוק בפועל של המזהה — פסקה, כותרת או פריט רשימה — לפי `blocks.list`.
+ * סוג הבלוק בפועל של המזהה — פסקה, כותרת או פריט רשימה — לפי `blocks.list`,
+ * ולפריט שאינו מופיע שם — לפי `lists.getState`.
  *
  * החוזה (`ParagraphTarget` ב-paragraphs.types.d.ts) דורש את הסוג האמיתי,
  * ולא ליטרל מקובע: כתובת עם `nodeType:'paragraph'` על בלוק שהוא בפועל
- * `heading` או `listItem` היא כתובת פסולה, וכתיבה חזרה אליה נכשלת. הפתרון
- * כאן הוא אותו דפוס בדיוק כמו `resolveListItem` ב-lists.ts.
+ * `heading` או `listItem` היא כתובת פסולה, וכתיבה חזרה אליה נכשלת.
  *
- * ברירת המחדל `'paragraph'` — גם כשאין `blocks.list`, וגם כשהמזהה לא נמצא
- * בעמוד שנקרא — היא התאמה לאחור: פסקה היא הסוג הנפוץ, וגרסת מנוע ישנה
- * שאינה חושפת את הפעולה לא הייתה מפסיקה לעבוד על המקרה הרגיל.
+ * `blocks.list` מונה בלוקים עליונים בלבד (בקריאה אחת — בלי ארגומנטים הוא
+ * מחזיר את כל הסיפור, נמדד), ולכן פריט רשימה בתוך תא טבלה אינו שם; שם
+ * מכריע `lists.getState`, כמו ב-`resolveListItem` ב-lists.ts. כותרת
+ * ממוספרת נשארת `heading`: זה מה ש-`blocks.list` מדווח, וכתובת ההפסקה
+ * שלה היא כתובת כותרת.
+ *
+ * ברירת המחדל `'paragraph'` — כשאין אף אחת מהפעולות, וכשהמזהה לא נמצא —
+ * היא התאמה לאחור: פסקה היא הסוג הנפוץ, וגרסת מנוע ישנה שאינה חושפת את
+ * הפעולות לא הייתה מפסיקה לעבוד על המקרה הרגיל.
  */
 async function resolveBlockType(
   doc: ParagraphFormatDocumentApi,
   blockId: string,
 ): Promise<ParagraphBlockType> {
   const list = doc.blocks?.list;
-  if (typeof list !== 'function') return 'paragraph';
+  if (typeof list === 'function') {
+    try {
+      const listed = await list();
+      const found = (listed?.blocks ?? []).find((b) => b.nodeId === blockId);
+      if (found) {
+        return found.nodeType === 'heading' || found.nodeType === 'listItem'
+          ? found.nodeType
+          : 'paragraph';
+      }
+    } catch {
+      // נופלים ל-lists.getState.
+    }
+  }
+
+  const getState = doc.lists?.getState;
+  if (typeof getState !== 'function') return 'paragraph';
   try {
-    const listed = await list();
-    const type = (listed?.blocks ?? []).find((b) => b.nodeId === blockId)?.nodeType;
-    return type === 'heading' || type === 'listItem' ? type : 'paragraph';
+    const state = await getState({ target: { kind: 'block', nodeType: 'paragraph', nodeId: blockId } });
+    return state?.success === true && state.isListItem ? 'listItem' : 'paragraph';
   } catch {
     return 'paragraph';
   }

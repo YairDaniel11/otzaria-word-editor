@@ -7,7 +7,7 @@
  * מוחק הערת שוליים — נמדדה בדפדפן, וההנמקה שלה ב-engine/footnotes.ts.
  */
 import { describe, expect, it } from 'vitest';
-import { autoUnmount, createSuperdocDouble, mountUi, settle } from './harness';
+import { autoUnmount, createSuperdocDouble, mountUi, settle, tipMessage } from './harness';
 
 import ReferencesTab from '../../src/ui/ribbon/tabs/ReferencesTab.vue';
 import NoteDialog from '../../src/ui/panels/NoteDialog.vue';
@@ -85,7 +85,7 @@ describe('הרצועה', () => {
 
     const insert = button(harness, 'הערת שוליים');
     expect(insert.attributes('disabled')).toBeDefined();
-    expect(insert.attributes('title')).toContain('עדיין בעבודה');
+    expect(tipMessage(insert)).toContain('עדיין בעבודה');
     await insert.trigger('click');
     await flush();
 
@@ -199,7 +199,7 @@ describe('הרצועה', () => {
 
     const control = button(harness, 'נהל הערות');
     expect(control.attributes('disabled')).toBeDefined();
-    expect(control.attributes('title')).toContain('אינה זמינה');
+    expect(tipMessage(control)).toContain('אינה זמינה');
   });
 
   it('הקבוצות שקדמו לגל הזה נשארו על מקומן', async () => {
@@ -210,7 +210,6 @@ describe('הרצועה', () => {
     expect(titles).toEqual([
       'תוכן עניינים',
       'הערות שוליים',
-      'הפניות מקושרות',
       'מפתח',
       'ציטוטים וביבליוגרפיה',
       'כיתובים',

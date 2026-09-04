@@ -13,18 +13,13 @@
         :disabled="!tocCmd.enabled.value"
         @click="tocCmd.run()"
       />
-      <RibbonButton
-        icon="updateFields"
-        label="עדכן טבלה"
-        variant="large"
-        :tooltip="updateTooltip"
-        :disabled="!can('canUpdateTableOfContents')"
-        @click="onUpdateToc"
-      />
       <!--
         „סמן ערך” הוא האייקון של הסימנייה: שני הפקדים מסמנים מקום במסמך בשדה
         בלתי נראה, ולסט אין גליף ייעודי לשדה `TC`. אייקון מושאל עדיף על
         אייקון חדש שמצויר מהזיכרון — ראו הבאנר ב-icons.ts.
+
+        הוא השני מבין הגדולים מפני שהוא הפעולה שחוזרת: בונים תוכן עניינים
+        פעם אחת, ומסמנים ערכים לאורך כל הספר.
       -->
       <RibbonButton
         icon="bookmark"
@@ -34,25 +29,36 @@
         :disabled="!can('canMarkTocEntry')"
         @click="onOpenEntryDialog"
       />
-      <RibbonButton
-        icon="toc"
-        label="התאמה אישית"
-        variant="large"
-        :tooltip="configureTooltip"
-        :disabled="!can('canConfigureTableOfContents')"
-        @click="onOpenTocDialog"
-      />
       <!--
-        אייקון ה„דחייה” של הסקירה הוא ה-X של הסט, וזו המשמעות כאן: הסרה.
+        שלושת המתחזקים במחסנית. אייקון ה„דחייה” של הסקירה הוא ה-X של הסט,
+        וזו המשמעות ב„הסר”: הסרה.
       -->
-      <RibbonButton
-        icon="reject"
-        label="הסר"
-        variant="large"
-        :tooltip="removeTooltip"
-        :disabled="!can('canRemoveTableOfContents')"
-        @click="onRemoveToc"
-      />
+      <RibbonStack>
+        <RibbonButton
+          icon="updateFields"
+          label="עדכן טבלה"
+          variant="small"
+          :tooltip="updateTooltip"
+          :disabled="!can('canUpdateTableOfContents')"
+          @click="onUpdateToc"
+        />
+        <RibbonButton
+          icon="toc"
+          label="התאמה אישית"
+          variant="small"
+          :tooltip="configureTooltip"
+          :disabled="!can('canConfigureTableOfContents')"
+          @click="onOpenTocDialog"
+        />
+        <RibbonButton
+          icon="reject"
+          label="הסר"
+          variant="small"
+          :tooltip="removeTooltip"
+          :disabled="!can('canRemoveTableOfContents')"
+          @click="onRemoveToc"
+        />
+      </RibbonStack>
     </RibbonGroup>
 
     <RibbonGroup title="הערות שוליים">
@@ -78,30 +84,21 @@
         „נהל הערות” הוא הפקד השלישי, והוא עורך ומסיר בלבד: ההוספה נשארת
         בשני הכפתורים שלצידו, מפני שהיא נכנסת במקום הסמן — והסמן אינו בעורך
         מרגע שדיאלוג נפתח. ראו engine/footnotes.ts.
-      -->
-      <RibbonButton
-        icon="book"
-        label="נהל הערות"
-        variant="large"
-        :tooltip="notesTooltip"
-        :disabled="!can('canManageNotes')"
-        @click="onOpenNoteDialog"
-      />
-    </RibbonGroup>
 
-    <!--
-      „הפניות מקושרות”. הפקד היחיד בקבוצה הוא עדכון, ולא הוספה: ראו הערת
-      הפתיחה.
-    -->
-    <RibbonGroup title="הפניות מקושרות">
-      <RibbonButton
-        icon="updateFields"
-        label="עדכן הפניות"
-        variant="large"
-        :tooltip="rebuildTooltip"
-        :disabled="!canRebuildCrossRefs"
-        @click="onRebuildCrossRefs"
-      />
+        ולכן דווקא הוא זה שיורד למחסנית ושני האחרים נשארים גדולים: ההבחנה
+        בין „מוסיף” ל„מנהל” היא בדיוק מה שההערה הזאת אומרת, והגודל אומר אותה
+        עכשיו גם בלי לקרוא אותה.
+      -->
+      <RibbonStack>
+        <RibbonButton
+          icon="book"
+          label="נהל הערות"
+          variant="small"
+          :tooltip="notesTooltip"
+          :disabled="!can('canManageNotes')"
+          @click="onOpenNoteDialog"
+        />
+      </RibbonStack>
     </RibbonGroup>
 
     <!--
@@ -126,30 +123,32 @@
         :disabled="!can('canInsertIndex')"
         @click="onInsertIndex"
       />
-      <RibbonButton
-        icon="updateFields"
-        label="עדכן מפתח"
-        variant="large"
-        :tooltip="indexRebuildTooltip"
-        :disabled="!can('canRebuildIndex')"
-        @click="onRebuildIndex"
-      />
-      <RibbonButton
-        icon="toc"
-        label="הגדרות מפתח"
-        variant="large"
-        :tooltip="indexConfigureTooltip"
-        :disabled="!can('canConfigureIndex')"
-        @click="onOpenIndexDialog"
-      />
-      <RibbonButton
-        icon="reject"
-        label="הסר מפתח"
-        variant="large"
-        :tooltip="indexRemoveTooltip"
-        :disabled="!can('canRemoveIndex')"
-        @click="onRemoveIndex"
-      />
+      <RibbonStack>
+        <RibbonButton
+          icon="updateFields"
+          label="עדכן מפתח"
+          variant="small"
+          :tooltip="indexRebuildTooltip"
+          :disabled="!can('canRebuildIndex')"
+          @click="onRebuildIndex"
+        />
+        <RibbonButton
+          icon="toc"
+          label="הגדרות מפתח"
+          variant="small"
+          :tooltip="indexConfigureTooltip"
+          :disabled="!can('canConfigureIndex')"
+          @click="onOpenIndexDialog"
+        />
+        <RibbonButton
+          icon="reject"
+          label="הסר מפתח"
+          variant="small"
+          :tooltip="indexRemoveTooltip"
+          :disabled="!can('canRemoveIndex')"
+          @click="onRemoveIndex"
+        />
+      </RibbonStack>
     </RibbonGroup>
 
     <!--
@@ -167,14 +166,6 @@
         @click="onOpenInsertCitationDialog"
       />
       <RibbonButton
-        icon="book"
-        label="נהל מקורות"
-        variant="large"
-        :tooltip="tip('canManageCitationSources', 'הוספה, עריכה ומחיקה של המקורות שבמסמך')"
-        :disabled="!can('canManageCitationSources')"
-        @click="onOpenSourceDialog"
-      />
-      <RibbonButton
         icon="toc"
         label="ביבליוגרפיה"
         variant="large"
@@ -182,27 +173,44 @@
         :disabled="!can('canInsertBibliography')"
         @click="onInsertBibliography"
       />
-      <RibbonButton
-        icon="updateFields"
-        label="עדכן ביבליוגרפיה"
-        variant="large"
-        :tooltip="bibRebuildTooltip"
-        :disabled="!can('canRebuildBibliography')"
-        @click="onRebuildBibliography"
-      />
-      <RibbonButton
-        icon="reject"
-        label="הסר ביבליוגרפיה"
-        variant="large"
-        :tooltip="bibRemoveTooltip"
-        :disabled="!can('canRemoveBibliography')"
-        @click="onRemoveBibliography"
-      />
+      <RibbonStack>
+        <RibbonButton
+          icon="book"
+          label="נהל מקורות"
+          variant="small"
+          :tooltip="tip('canManageCitationSources', 'הוספה, עריכה ומחיקה של המקורות שבמסמך')"
+          :disabled="!can('canManageCitationSources')"
+          @click="onOpenSourceDialog"
+        />
+        <RibbonButton
+          icon="updateFields"
+          label="עדכן ביבליוגרפיה"
+          variant="small"
+          :tooltip="bibRebuildTooltip"
+          :disabled="!can('canRebuildBibliography')"
+          @click="onRebuildBibliography"
+        />
+        <RibbonButton
+          icon="reject"
+          label="הסר ביבליוגרפיה"
+          variant="small"
+          :tooltip="bibRemoveTooltip"
+          :disabled="!can('canRemoveBibliography')"
+          @click="onRemoveBibliography"
+        />
+      </RibbonStack>
     </RibbonGroup>
 
     <!--
-      „כיתובים”. פקד אחד מתוך ארבעה של Word, וההנמקה לשלושה שאינם כאן
-      בהערת הפתיחה.
+      „כיתובים”, ובה גם „עדכן הפניות”. ההנמקה לשני הפקדים שאינם כאן בהערת
+      הפתיחה.
+
+      המיזוג אינו סידור אלא מקום: ב-Word העברי „הפניה מקושרת” יושבת **בתוך**
+      קבוצת „כיתובים” של לשונית „הפניות”, ולא בקבוצה משלה. „עדכן הפניות” הוא
+      הצד היחיד של אותו API שעובד כאן (ראו הערת הפתיחה), ולכן זה מקומו.
+
+      מה שהיה קודם — שתי קבוצות סמוכות, כל אחת עם כפתור בודד וכותרת משלה —
+      נראה כמו שני פקדים שאיש לא מצא להם בית, וזה גם מה שהוא היה.
     -->
     <RibbonGroup title="כיתובים">
       <RibbonButton
@@ -213,6 +221,16 @@
         :disabled="!can('canManageCaptions')"
         @click="onOpenCaptionDialog"
       />
+      <RibbonStack>
+        <RibbonButton
+          icon="updateFields"
+          label="עדכן הפניות"
+          variant="small"
+          :tooltip="rebuildTooltip"
+          :disabled="!canRebuildCrossRefs"
+          @click="onRebuildCrossRefs"
+        />
+      </RibbonStack>
     </RibbonGroup>
 
     <TocDialog
@@ -295,7 +313,7 @@
  * שמצטבר, ולכן הוא הוסר ולא „תוקן”: רישום קיצור גלובלי הוא שינוי במעטפת, לא
  * בלשונית.
  *
- * ## „עדכן הפניות”, ולמה אין „הפניה מקושרת” לצידו
+ * ## „עדכן הפניות”, ולמה אין „הפניה מקושרת” לצידו, ולמה הוא בקבוצת „כיתובים”
  *
  * ב-Word העברי „הפניה מקושרת” יושבת בשתי לשוניות — „הוספה” ו„הפניות” — והיא
  * אינה כאן באף אחת מהן. `crossRefs.insert` מוצהר זמין ומחזיר `success: true`,
@@ -306,6 +324,11 @@
  * מה שכן כאן הוא הצד השני של אותו API: `crossRefs.list` מחזיר גם את ההפניות
  * שנוצרו **ב-Word** במסמך שנפתח כאן, ו-`rebuild` עליהן עובד. זה המסלול
  * שהפקד משרת — מסמך שהגיע מ-Word וההפניות בו התיישנו אחרי עריכה.
+ *
+ * הוא ישב בקבוצה משלו, „הפניות מקושרות”, ובה פקד בודד. זה לא היה מקומו: ב-Word
+ * העברי „הפניה מקושרת” יושבת בקבוצת **„כיתובים”** של הלשונית הזאת, ולא בקבוצה
+ * נפרדת. שתי הקבוצות אוחדו, ומה שהיה שתי כותרות מעל שני כפתורים בודדים סמוכים
+ * הוא עכשיו קבוצה אחת עם ראשי ומשני.
  *
  * זמינות ההערות נקבעת מ-`doc.capabilities` ולא מהנחה: `footnotes` הוא adapter
  * אופציונלי בחוזה של המנוע, וכשהוא חסר הפקד מנוטרל עם ההסבר „אינו זמין בגרסה
@@ -400,10 +423,11 @@
  * קשר למי יצר את השדה. `blocks.list` דווקא **אינו** מסמן אותה, וגם
  * ל-`citations.bibliography` אין `list` משלה.
  *
- * ## קבוצת „כיתובים”, ולמה יש בה פקד אחד
+ * ## קבוצת „כיתובים”, ומה יש בה
  *
- * ב-Word העברי הקבוצה נושאת ארבעה פקדים, וכאן יש אחד. השלושה שאינם כאן
- * אינם השמטה, וכל אחד מהם נפל על סיבה אחרת:
+ * ב-Word העברי הקבוצה נושאת ארבעה פקדים, וכאן יש שניים: „הוסף כיתוב”
+ * ו„עדכן הפניות” (ראו למעלה — זה מקומו ב-Word). השניים שאינם כאן אינם
+ * השמטה, וכל אחד מהם נפל על סיבה אחרת:
  *
  * - **„הוסף טבלת איורים”** ו„עדכן טבלה” שלה עוברים דרך `create.tableOfContents`
  *   עם `TOC \c "איור"`. המסלול נמדד ועובד — השדה נכתב קנונית, ו-`toc.list`
@@ -411,8 +435,8 @@
  *   ל-engine/toc.ts, שאינו בהיקף הגל הזה. מה שכן ראוי לדעת לפני שייכתב:
  *   המנוע אינו אוסף את הכיתובים לתוכה, ו-`entryCount` נשאר 0 גם אחרי
  *   `toc.update`. Word ימלא אותה בפתיחה, בדיוק כמו את המפתח.
- * - **„הפניה מקושרת”** אינה כאן מאותה סיבה שהיא אינה בקבוצת „הפניות
- *   מקושרות”: `crossRefs.insert` כותב `REF SDXREF`. ראו למעלה.
+ * - **„הפניה מקושרת”** — ההוספה, להבדיל מהעדכון שכן כאן — אינה כאן מפני
+ *   ש-`crossRefs.insert` כותב `REF SDXREF`. ראו למעלה.
  *
  * מה שכן כאן — „הוסף כיתוב” — נשלח אחרי אימות ב-docx: פסקה בסגנון `Caption`
  * עם `<w:fldSimple w:instr="SEQ איור \* ARABIC">`, כלומר **התווית העברית
@@ -424,6 +448,7 @@
 import { computed, inject, ref, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
+import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import { useCommand } from '../../../composables/useCommand';
 import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';

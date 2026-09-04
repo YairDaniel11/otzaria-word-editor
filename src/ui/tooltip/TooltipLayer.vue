@@ -47,46 +47,34 @@
  *
  * ## למה שכבה אחת ומסירת אירועים, ולא מאזינים בכל פקד
  *
- * שלוש סיבות, ואף אחת מהן אינה נוחות:
+ * שתי סיבות, ואף אחת מהן אינה נוחות:
  *
  * 1. **כפתור מנוטרל.** הדפדפן אינו שולח אירועי עכבר לפקד `disabled` — האירוע
  *    מנותב להורה. בדיוק שם הטולטיפ הכי נחוץ: הוא נושא את *הסיבה* („אין
  *    בחירה”, „הפעולה אינה זמינה בגרסה הזאת של המנוע”). לכן העוגן נפתר גם
  *    ב-`elementFromPoint`, שהיא בדיקה גיאומטרית ואינה תלויה בשליחת אירועים.
- * 2. **כיסוי מלא ללא חיווט.** `readTip` נופל לתכונת `title` כשאין תכונות
- *    `data-tip-*`, ולכן כל פקד שכבר יש לו `title` — הפס העליון, שורת המצב,
- *    לוח הצבעים, בוררי הגופן — קיבל את העיצוב החדש בלי שנגענו בו.
- * 3. **טולטיפ אחד בלבד על המסך.** טיימר וסטייט לכל פקד היו מאפשרים שניים
+ * 2. **טולטיפ אחד בלבד על המסך.** טיימר וסטייט לכל פקד היו מאפשרים שניים
  *    בבת אחת בזמן מעבר מהיר בין כפתורים.
  *
- * ## הטולטיפ המולד חייב להיכבות
+ * ## אין כאן כיבוי של הטולטיפ המולד, כי אין מה לכבות
  *
- * `title` נשאר על הפקדים: הוא השם הנגיש של כפתור חסר תווית, והוא הנפילה לאחור.
- * אבל אם הוא נשאר גם *בזמן* שהכרטיס מוצג, מערכת ההפעלה מציירת את המלבן האפור
- * שלה מעליו — שני טולטיפים לאותו כפתור. לכן התכונה מוסרת מהעוגן הפעיל
- * ומוחזרת לו ביציאה, וכדי שהשם הנגיש לא ייעלם בינתיים הוא נשמר ב-`aria-label`
- * (רק אם לא היה שם כזה קודם). ההסרה היא רק במסלול העכבר: במיקוד מקלדת הדפדפן
- * אינו מצייר טולטיפ מולד כלל, ואין מה לכבות.
+ * הגרסה הראשונה השאירה `title` על הפקדים והסירה אותו בריחוף. זה נכשל, ונראה
+ * בצילום מסך: הכרטיס והמלבן האפור זה מעל זה על „כיוון פסקה משמאל לימין”.
+ * הדפדפן קורא את `title` **בתזוזת העכבר** ולא כשהוא מצייר, כך שהטקסט כבר נלכד
+ * בתזוזה שבה הסמן נעצר וההשהיה שלו כבר רצה; הסרה שמתרחשת אחריה אינה מבטלת
+ * כלום. אין תזמון שמנצח את זה — כל עוד התכונה על האלמנט כשהעכבר עוצר, המלבן
+ * יצויר.
  *
- * ### ומה שההסרה שברה: פקד שכל תוכנו הוא `title`
- *
- * העוגן מזוהה ב-`TIP_ANCHOR_SELECTOR`, ובפקד שאין לו `data-tip-title` **התכונה
- * שהוסרה היא בדיוק מה שהפך אותו לעוגן**. נמדד ב-Chrome על ה-dist הארוז, על
- * `.word-app-badge` שבפס העליון: ריחוף פותח את הכרטיס ומסיר את ה-`title`,
- * ותזוזה של פיקסל אחד סוגרת אותו — `anchorAt` מחזיר `null` בשני המסלולים,
- * `scheduleHide` רץ, ה-`title` חוזר, וכעבור 400ms הכול חוזר חלילה. כלומר
- * הבהוב, ודווקא על כל מה שסעיף 2 שלמעלה הבטיח לכסות בלי חיווט.
- *
- * לכן ההסרה אינה מוחקת את התוכן אלא **מעבירה** אותו ל-`data-tip-title` לאורך
- * ההשהיה. האלמנט נשאר עוגן, `readTip` מחזיר את אותו תוכן בדיוק — הוא קורא את
- * שתי התכונות באותה נפילה — ומערכת ההפעלה כבר אינה מציירת דבר.
+ * לכן `title` אינו קיים באף אלמנט DOM בתוכנה (ראו `TIP_ANCHOR_SELECTOR`
+ * ב-tooltip-content.ts, ואת השער tests/unit/native-title.test.ts שאוכף זאת).
+ * מה שהיה כאן מנגנון השאלה-והחזרה של שלוש תכונות — נמחק: הבעיה אינה מנוהלת,
+ * היא אינה קיימת.
  */
 import { nextTick, onUnmounted, ref, shallowRef, type CSSProperties } from 'vue';
 import { popoverPlacement } from '../../composables/popover-position';
 import {
   TIP_ANCHOR_SELECTOR,
   TIP_EXCLUDED_SELECTOR,
-  TIP_TITLE_ATTR,
   readTip,
   type TipContent,
 } from './tooltip-content';
@@ -146,45 +134,11 @@ let muted: HTMLElement | null = null;
 let showTimer = 0;
 let hideTimer = 0;
 
-/** מה שהוסר מהעוגן כדי לכבות את הטולטיפ המולד. ראו ההסבר בראש הקובץ. */
-let suppression: {
-  element: HTMLElement;
-  title: string;
-  borrowedLabel: boolean;
-  /** ה-`data-tip-title` הוא שלנו ולא של הפקד, ולכן יורד ביציאה. */
-  borrowedTip: boolean;
-} | null = null;
-
 function clearTimers(): void {
   window.clearTimeout(showTimer);
   window.clearTimeout(hideTimer);
   showTimer = 0;
   hideTimer = 0;
-}
-
-function suppressNative(element: HTMLElement): void {
-  const title = element.getAttribute('title');
-  if (!title) return;
-
-  const borrowedLabel = !element.hasAttribute('aria-label');
-  if (borrowedLabel) element.setAttribute('aria-label', title);
-  // התוכן עובר ולא נמחק: בלי זה פקד שכל תוכנו `title` מפסיק להיות עוגן ברגע
-  // שהכרטיס נפתח, והתזוזה הבאה סוגרת אותו. ההסבר המלא בראש הקובץ.
-  const borrowedTip = !element.hasAttribute(TIP_TITLE_ATTR);
-  if (borrowedTip) element.setAttribute(TIP_TITLE_ATTR, title);
-  element.removeAttribute('title');
-  suppression = { element, title, borrowedLabel, borrowedTip };
-}
-
-function restoreNative(): void {
-  if (!suppression) return;
-  const { element, title, borrowedLabel, borrowedTip } = suppression;
-  suppression = null;
-  // אלמנט שיצא מה-DOM בזמן שהכרטיס היה פתוח (לשונית שהתחלפה) — אין מה להחזיר.
-  if (!element.isConnected) return;
-  element.setAttribute('title', title);
-  if (borrowedLabel) element.removeAttribute('aria-label');
-  if (borrowedTip) element.removeAttribute(TIP_TITLE_ATTR);
 }
 
 function describe(element: HTMLElement, tip: TipContent): void {
@@ -221,19 +175,13 @@ function place(): void {
 
 function hide(): void {
   clearTimers();
-  restoreNative();
   undescribe(anchor);
   anchor = null;
   content.value = null;
   tipStyle.value = { ...UNPLACED };
 }
 
-/**
- * @param viaPointer העכבר הוא מה שהביא לכאן. במיקוד מקלדת אין טולטיפ מולד
- *                   לכבות, ואין טעם לגעת בתכונות של הפקד.
- */
-function show(element: HTMLElement, tip: TipContent, viaPointer: boolean): void {
-  restoreNative();
+function show(element: HTMLElement, tip: TipContent): void {
   undescribe(anchor);
 
   anchor = element;
@@ -241,7 +189,6 @@ function show(element: HTMLElement, tip: TipContent, viaPointer: boolean): void 
   tipKey.value += 1;
   tipStyle.value = { ...UNPLACED };
 
-  if (viaPointer) suppressNative(element);
   describe(element, tip);
 
   void nextTick(place);
@@ -251,7 +198,7 @@ function show(element: HTMLElement, tip: TipContent, viaPointer: boolean): void 
 function schedule(element: HTMLElement, tip: TipContent): void {
   clearTimers();
   const delay = content.value ? SWITCH_DELAY_MS : SHOW_DELAY_MS;
-  showTimer = window.setTimeout(() => show(element, tip, true), delay);
+  showTimer = window.setTimeout(() => show(element, tip), delay);
 }
 
 function scheduleHide(): void {
@@ -336,7 +283,7 @@ function onFocusIn(event: FocusEvent): void {
   if (!tip) return;
 
   clearTimers();
-  show(element, tip, false);
+  show(element, tip);
 }
 
 function onFocusOut(event: FocusEvent): void {

@@ -36,7 +36,7 @@
       <button
         type="button"
         class="word-ribbon-toggle"
-        :title="isCollapsed ? menuString('הצג את הרצועה') : menuString('כווץ את הרצועה')"
+        :data-tip-title="isCollapsed ? menuString('הצג את הרצועה') : menuString('כווץ את הרצועה')"
         :aria-label="isCollapsed ? menuString('הצג את הרצועה') : menuString('כווץ את הרצועה')"
         :aria-expanded="!isCollapsed"
         :aria-controls="RIBBON_PANEL_ID"
@@ -64,11 +64,11 @@
         :has-pdf-export="hasPdfExport"
         :is-saving="isSaving"
         :is-opening="isOpening"
+        :is-exiting="isExiting"
         @new-doc="$emit('new-doc')"
         @open-doc="$emit('open-doc')"
         @save-doc="$emit('save-doc')"
         @save-as-doc="$emit('save-as-doc')"
-        @export-doc="$emit('export-doc')"
         @print-doc="$emit('print-doc')"
         @export-pdf="$emit('export-pdf')"
         @about="$emit('about')"
@@ -91,15 +91,20 @@
         v-else-if="currentTabId === 'view'"
         @toggle-focus-mode="$emit('toggle-focus-mode')"
       />
+      <DeveloperTab
+        v-else-if="currentTabId === 'developer'"
+        @manage-macros="$emit('manage-macros')"
+        @macro-record="$emit('macro-record')"
+        @macro-play="$emit('macro-play')"
+      />
+      <ShulchanTab v-else-if="currentTabId === 'shulchan'" />
       <OtzariaTab
         v-else-if="currentTabId === 'otzaria'"
         :book-completion-enabled="bookCompletionEnabled"
         @insert-citation="$emit('insert-citation')"
         @search-otzaria="$emit('search-otzaria')"
         @open-library="$emit('open-library')"
-        @manage-macros="$emit('manage-macros')"
-        @macro-record="$emit('macro-record')"
-        @macro-play="$emit('macro-play')"
+        @export-otzaria="$emit('export-otzaria')"
         @toggle-book-completion="$emit('toggle-book-completion')"
       />
     </div>
@@ -118,6 +123,8 @@ import LayoutTab from './tabs/LayoutTab.vue';
 import ReferencesTab from './tabs/ReferencesTab.vue';
 import ReviewTab from './tabs/ReviewTab.vue';
 import ViewTab from './tabs/ViewTab.vue';
+import DeveloperTab from './tabs/DeveloperTab.vue';
+import ShulchanTab from './tabs/ShulchanTab.vue';
 import OtzariaTab from './tabs/OtzariaTab.vue';
 
 interface TabDefinition {
@@ -134,6 +141,10 @@ const TABS: TabDefinition[] = [
   { id: 'references', label: 'הפניות' },
   { id: 'review', label: 'סקירה' },
   { id: 'view', label: 'תצוגה' },
+  // „מפתחים” יושבת אחרי „תצוגה”, במקום שבו Word מציב אותה, ומחזיקה את המאקרו
+  // שישבו עד עכשיו ב„אוצריא” — ראו DeveloperTab.vue.
+  { id: 'developer', label: 'מפתחים' },
+  { id: 'shulchan', label: 'שולחן העורך' },
   { id: 'otzaria', label: '✦ אוצריא', className: 'otzaria-tab' },
 ];
 
@@ -162,9 +173,17 @@ withDefaults(
     hasPdfExport?: boolean;
     isSaving?: boolean;
     isOpening?: boolean;
+    isExiting?: boolean;
     bookCompletionEnabled?: boolean;
   }>(),
-  { hasDocument: false, hasPdfExport: false, isSaving: false, isOpening: false, bookCompletionEnabled: false },
+  {
+    hasDocument: false,
+    hasPdfExport: false,
+    isSaving: false,
+    isOpening: false,
+    isExiting: false,
+    bookCompletionEnabled: false,
+  },
 );
 
 /**
@@ -198,9 +217,9 @@ defineEmits<{
   (e: 'open-doc'): void;
   (e: 'save-doc'): void;
   (e: 'save-as-doc'): void;
-  (e: 'export-doc'): void;
   (e: 'print-doc'): void;
   (e: 'export-pdf'): void;
+  (e: 'export-otzaria'): void;
   (e: 'about'): void;
   (e: 'shortcuts-help'): void;
   (e: 'exit-app'): void;

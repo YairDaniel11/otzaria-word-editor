@@ -16,7 +16,8 @@
         <button
           type="button"
           class="ic-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את הוספת הציטוט"
           @click="$emit('close')"
         >

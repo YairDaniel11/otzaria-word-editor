@@ -276,6 +276,9 @@ function localizeOnce(root: ParentNode): void {
     relabel(span, (source) => hebrewLabel(source, null, null));
   }
 
+  // `title` מולד ולא `data-tip-*`, וזה ההיתר היחיד בתוכנה: זה DOM של המנוע
+  // בתוך `.editor-stack`, שהשכבה מוציאה מכוונה (TIP_EXCLUDED_SELECTOR).
+  // מאוכף ב-tests/unit/native-title.test.ts.
   for (const button of [...root.querySelectorAll(`[${HF_HOOKS.options}]`)]) {
     relabel(button, () => HF_TEXTS.optionsButton);
     setAttribute(button, 'title', HF_TEXTS.optionsTitle);

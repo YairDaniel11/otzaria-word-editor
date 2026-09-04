@@ -90,3 +90,34 @@
 :root:not([data-menu-locale='en']) [data-sd-hf-option='footer-from-bottom'] .v2-hf-distance-unit {
   width: auto;
 }
+
+/* באנר „edit-rejected" של המנוע — הסתרה, לא עברות.
+
+   superdoc@2.11.0 הוסיף הודעת מצב צפה מעל בד המסמך:
+   „This edit couldn't be completed. Adjust the selection and try again.",
+   שנורית כשמחיקה במקלדת (Backspace/Delete/Cut) נדחית. בניגוד להודעה
+   המקבילה ב-2.10.0 (`author-required`), שהייתה `sd-visually-hidden` ולכן
+   בלתי נראית, זו **מצוירת** — ‎`position: sticky` בראש `.superdoc__layers`.
+
+   **היא פועלת גם תחת `ui: false`.** נמדד בשני ה-dist הארוזים: ב-2.10.0
+   `.superdoc__mutation-status` אינו קיים בעץ כלל, וב-2.11.0 הוא קיים ונושא
+   את המשפט האנגלי. דווח למעלה:
+   https://github.com/superdoc/docx-editor/issues/3957
+
+   למה הסתרה ולא ::after כמו בשאר הגיליון: הטקסט כאן הוא צומת טקסט ישיר של
+   ה-`p`, לא `> span` שאפשר לכבות — ו-`role="status" aria-live="polite"`
+   אומר שקורא מסך יקריא את צומת הטקסט ולא את הפסאודו. כלומר „תרגום” ב-CSS
+   היה משאיר אנגלית מוקראת מתחת לעברית מצוירת. עד שיהיה מתג או הגדרת
+   טקסטים במנוע, הסתרה היא הדבר הכן.
+
+   מה המשתמש מפסיד: כלום שהוא רואה היום ממילא. הכשל מגיע אלינו גם דרך
+   `onException` עם `code: 'edit-rejected'` (create-editor.ts), ושם הוא
+   נרשם ללוג. הודעה עברית משלנו על מחיקה שנדחתה היא פיצ'ר בפני עצמו.
+
+   העיגון הוא ב-`data-superdoc-v2-edit-rejected` — תכונה סמנטית — ולא
+   במחלקה. tests/contract/engine-edit-rejected-banner.test.ts מאמת שהיא
+   עדיין קיימת באריזה: אם SuperDoc יסגור את הבאג או ישנה את המבנה, הבדיקה
+   תיפול, וזה הסימן למחוק את הכלל הזה במקום להשאיר הסתרה של DOM שאינו קיים. */
+:root:not([data-menu-locale='en']) .superdoc__mutation-status:has([data-superdoc-v2-edit-rejected]) {
+  display: none;
+}

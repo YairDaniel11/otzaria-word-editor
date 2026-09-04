@@ -48,7 +48,7 @@
         :aria-valuemax="round2(handle.maxValueTwips / unitTwips)"
         :aria-valuenow="round2(handle.valueTwips / unitTwips)"
         :aria-valuetext="measureLabel(handle.valueTwips, unit)"
-        :title="`${handle.label}: ${measureLabel(handle.valueTwips, unit)}`"
+        :data-tip-title="`${handle.label}: ${measureLabel(handle.valueTwips, unit)}`"
         :style="{ left: `${handle.px}px` }"
         @pointerdown="onPointerDown(handle, $event)"
         @keydown="onKeyDown(handle, $event)"

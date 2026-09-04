@@ -19,12 +19,12 @@
 import { describe, expect, it } from 'vitest';
 import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
 import {
-  SETTLED_CARET,
   autoUnmount,
-  buttonByTitle,
+  buttonByTip,
   createCommandDouble,
   mountUi,
   settle,
+  SETTLED_CARET,
 } from './harness';
 
 autoUnmount();
@@ -33,8 +33,8 @@ const CARET_UNSETTLED = { empty: true, settled: false };
 const RANGE_SETTLED = { empty: false, settled: true };
 
 /** האם כפתור היישור דלוק. */
-function isActive(wrapper: Parameters<typeof buttonByTitle>[0], title: string): boolean {
-  return buttonByTitle(wrapper, title).classes().includes('active');
+function isActive(wrapper: Parameters<typeof buttonByTip>[0], title: string): boolean {
+  return buttonByTip(wrapper, title).classes().includes('active');
 }
 
 async function mountAligned(alignment: unknown = 'right') {
@@ -133,7 +133,7 @@ describe('ערך טרי מנצח את ההחזקה', () => {
     const harness = await mountAligned('right');
     await harness.setReadoutSelection(CARET_UNSETTLED);
 
-    await buttonByTitle(harness.wrapper, 'מרכז').trigger('click');
+    await buttonByTip(harness.wrapper, 'מרכז').trigger('click');
     await settle();
     // הכפיל מדווח את מה שהפקודה החילה, כמו המנוע.
     harness.adapter.setState('text-align', { value: 'center' });

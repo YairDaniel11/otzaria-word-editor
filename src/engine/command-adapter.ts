@@ -9,7 +9,15 @@
 import type { BorrowedSuperDocUI } from 'superdoc';
 import type { CommandExecutionResult, CommandState, SuperDocUIReason } from 'superdoc/ui';
 
-export type CommandOutcome = { ok: true } | { ok: false; message: string; reason?: string };
+/**
+ * תוצאת פקודה. `note` הוא ערוץ ל**הצלחה שיש עליה מה לומר** — פעולה שבוצעה
+ * במלואה, אבל המנוע יצייר את התוצאה אחרת ממה שהמשתמש מצפה. בלעדיו יש רק שתי
+ * אפשרויות, „שקט” או „נכשלה”, ושתיהן שקר: הפעולה לא נכשלה, ושתיקה משאירה את
+ * המשתמש מול תצוגה שנראית שבורה בלי הסבר.
+ */
+export type CommandOutcome =
+  | { ok: true; note?: string }
+  | { ok: false; message: string; reason?: string };
 
 /**
  * ה-reason של ה-controller — למה הפקודה חסומה. `Record` ולא `Partial<Record>`

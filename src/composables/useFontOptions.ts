@@ -6,12 +6,12 @@
  * בורר ריק.
  */
 import { computed, inject, shallowRef, type ComputedRef } from 'vue';
-import type { FontFamilyOption, FontSizeOption } from 'superdoc/ui';
-import { fallbackFontOptions } from '../engine/font-options';
+import type { FontSizeOption } from 'superdoc/ui';
+import { fallbackFontOptions, type FontFamilyChoice } from '../engine/font-options';
 import { FONT_OPTIONS } from './keys';
 
 export interface UseFontOptions {
-  families: ComputedRef<readonly FontFamilyOption[]>;
+  families: ComputedRef<readonly FontFamilyChoice[]>;
   sizes: ComputedRef<readonly FontSizeOption[]>;
 }
 

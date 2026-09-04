@@ -1,0 +1,50 @@
+/* „סימני חיתוך” של שולחן העורך — שמונת הקווים בפינות תיבת העמוד.
+
+   למה CSS ולא צורות בקובץ: למנוע אין `create.shape`, ולכן הקווים הם ציור
+   של העורך בלבד (engine/shulchan/crop-marks.ts). הם מצוירים כשכבות
+   `background-image` על תיבת העמוד המצוירת עצמה — לא כ-::after ממוקם, כדי
+   לא להניח דבר על `position` של העמוד — וכך הם נמתחים עם ה-transform של
+   הזום, נכנסים להדפסת הדפדפן (הסימן היחיד מ-print.css שנוגע בהם: הרקעים
+   נדפסים) ול-PDF של אוצריא שמרונדר מאותו דף.
+
+   הגיאומטריה (המקור, CropMarks.bas): `m` המ"מ שנבחרו, `b = m/5` מרחק
+   מקצה הדף, `len = m − b − b/1.4` אורך כל קו, `w` העובי. ארבעת המשתנים
+   נכתבים על `<html>` יחד עם `data-crop-marks` (ראו applyCropMarksStyle).
+
+   `!important` מפני שהמנוע כותב את רקע העמוד כסגנון inline. הצבע הוא
+   `currentColor` — צבע הטקסט של הדף המצויר, כלומר שחור על נייר לבן בכל
+   ערכת נושא, בלי צבע קשיח (tests/unit/css-hygiene.test.ts). */
+
+html[data-crop-marks] .superdoc-page {
+  background-image:
+    linear-gradient(currentColor, currentColor),
+    linear-gradient(currentColor, currentColor),
+    linear-gradient(currentColor, currentColor),
+    linear-gradient(currentColor, currentColor),
+    linear-gradient(currentColor, currentColor),
+    linear-gradient(currentColor, currentColor),
+    linear-gradient(currentColor, currentColor),
+    linear-gradient(currentColor, currentColor) !important;
+  background-repeat: no-repeat !important;
+  background-size:
+    var(--crop-w) var(--crop-len),
+    var(--crop-w) var(--crop-len),
+    var(--crop-len) var(--crop-w),
+    var(--crop-len) var(--crop-w),
+    var(--crop-len) var(--crop-w),
+    var(--crop-len) var(--crop-w),
+    var(--crop-w) var(--crop-len),
+    var(--crop-w) var(--crop-len) !important;
+  /* 0-1: אנכיים למעלה; 2-3: אופקיים למעלה; 4-5: אופקיים למטה; 6-7: אנכיים למטה. */
+  background-position:
+    left var(--crop-m) top var(--crop-b),
+    right var(--crop-m) top var(--crop-b),
+    left var(--crop-b) top var(--crop-m),
+    right var(--crop-b) top var(--crop-m),
+    left var(--crop-b) bottom var(--crop-m),
+    right var(--crop-b) bottom var(--crop-m),
+    left var(--crop-m) bottom var(--crop-b),
+    right var(--crop-m) bottom var(--crop-b) !important;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}

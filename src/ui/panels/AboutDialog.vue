@@ -26,7 +26,8 @@
         <button
           type="button"
           class="about-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את חלון האודות"
           @click="$emit('close')"
         >
@@ -100,7 +101,7 @@ import SvgIcon from '../icons/SvgIcon.vue';
 
 /** ראו ההסבר למעלה: מקור האמת הוא package.json. */
 const APP_VERSION = '2.0.0';
-const ENGINE_VERSION = '2.10.0';
+const ENGINE_VERSION = '2.11.0';
 
 /** מקשר את החלון לכותרת שלו — השם הנגיש שחסר לו. */
 const TITLE_ID = 'about-dialog-title';

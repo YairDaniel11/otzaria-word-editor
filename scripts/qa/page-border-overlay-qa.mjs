@@ -17,8 +17,8 @@
  */
 import { openApp, createReport, sleep } from './harness.mjs';
 
-const PORT = 9368;
-const report = createReport('גבולות עמוד — ציור בפועל בעורך');
+const PORT = Number(process.env.QA_PORT ?? 9368);
+const report = createReport('גבולות עמוד — ציור בפועל בעורך', { strict: true });
 
 const PX_PER_POINT = 96 / 72; // נקודה = 96/72 פיקסל CSS (96dpi)
 const eighthsToPx = (e) => Math.max(0.5, (e / 8) * PX_PER_POINT);
@@ -375,5 +375,4 @@ try {
   app.close();
 }
 
-report.print();
-process.exit(0);
+process.exit(report.print() > 0 ? 1 : 0);

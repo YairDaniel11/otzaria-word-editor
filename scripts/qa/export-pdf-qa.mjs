@@ -39,6 +39,22 @@ try {
     ? report.pass('נשלחה קריאה אחת', JSON.stringify(calls[0]))
     : report.fail('קריאות', JSON.stringify(calls));
 
+  /* ---------- העימוד שנמסר לאוצריא ----------
+   *
+   * מול מה שאוצריא מקבלת ב-`_parsePdfLayout` (‏plugin_bridge_adapter.dart):
+   * `pageSize` כמפה `{widthMm, heightMm}`, ‏10–5080 מ"מ לצד. שם קבוע גם הוא
+   * מתקבל שם, אבל אנחנו מוסרים מידות — הן של המסמך, והן אלה שהוזרקו ל-`@page`
+   * (ראו ExportPdfLayoutInput). השער דורש את מה שאנחנו באמת שולחים, ובתחום
+   * שהגשר באמת מקבל.
+   */
+  const layout = calls[0] ?? {};
+  const size = layout.pageSize;
+  const sideOk = (mm) => typeof mm === 'number' && mm >= 10 && mm <= 5080;
+  sideOk(size?.widthMm) && sideOk(size?.heightMm) &&
+  layout.marginMm === 0 && layout.printBackgrounds === true
+    ? report.pass('מידות הדף במ"מ, שוליים 0 ורקעים — בתחום שהגשר מקבל', JSON.stringify(size))
+    : report.fail('עימוד', JSON.stringify(layout));
+
   const pageStyle = await app.js(
     `(function(){ var e = document.getElementById('otzaria-print-page'); return e ? e.textContent : null; })()`,
   );

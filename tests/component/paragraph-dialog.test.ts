@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { DOMWrapper } from '@vue/test-utils';
 import ParagraphDialog from '../../src/ui/panels/ParagraphDialog.vue';
 import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
-import { autoUnmount, createSuperdocDouble, mountUi, settle } from './harness';
+import { autoUnmount, createSuperdocDouble, mountUi, settle, tipStartsSelector } from './harness';
 
 autoUnmount();
 
@@ -32,7 +32,7 @@ function footerButton(label: string): DOMWrapper<Element> {
   return new DOMWrapper(found);
 }
 
-const PARAGRAPH_BUTTON = 'button[title^="תפריט פסקה"]';
+const PARAGRAPH_BUTTON = tipStartsSelector('תפריט פסקה');
 
 const EMPTY_SNAPSHOT = {
   indentation: { leftTwips: 0, rightTwips: 0, firstLineTwips: 0, hangingTwips: 0 },

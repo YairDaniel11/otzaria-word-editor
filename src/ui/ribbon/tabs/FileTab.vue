@@ -21,6 +21,13 @@
       />
     </RibbonGroup>
 
+    <!--
+      שני פקדים **גדולים**, ולא גדול ומחסנית: „שמור” ו„שמור בשם” אינם פעולה
+      והווריאנט שלה אלא שני יעדי כתיבה — הקובץ שהמסמך יושב עליו, וקובץ חדש —
+      ועל מסמך שטרם נשמר הם אף אותה פעולה בדיוק (בלי יעד, ה-commit פותח את
+      דיאלוג „שמור בשם”; ראו sessions/save-coordinator.ts). קבוצה של שני
+      גדולים היא גם מה ש„קובץ ומסמך” ו„מידע” כבר עושות בלשונית הזאת.
+    -->
     <RibbonGroup title="שמירה">
       <RibbonButton
         icon="save"
@@ -42,32 +49,33 @@
       />
     </RibbonGroup>
 
+    <!--
+      כאן היה „ייצוא ל-Word” כפקד הגדול, והוא הוסר: הוא הוריד עותק `.docx`
+      לתיקיית ההורדות דרך `<a download>` — בלי יעד קבוע, בלי לנקות את הדגל
+      „לא נשמר”, ובלי שהשמירה האוטומטית נתפסת על העותק. כלומר הוא נראה כמו
+      שמירה ולא היה שמירה, ומי שחיפש „להוציא את הקובץ ל-Word” כבר מקבל בדיוק
+      את זה מ„שמור בשם”, שכותב `.docx` דרך מסלול הכתיבה של אוצריא.
+    -->
     <RibbonGroup title="ייצוא והדפסה">
-      <RibbonButton
-        icon="export"
-        label="ייצוא ל-Word"
-        variant="large"
-        :tooltip="documentTooltip('הורדת קובץ .docx תואם Microsoft Word')"
-        :disabled="!hasDocument"
-        @click="$emit('export-doc')"
-      />
-      <RibbonButton
-        icon="exportPdf"
-        label="ייצוא ל-PDF"
-        variant="large"
-        :tooltip="pdfExportTooltip"
-        :disabled="!hasDocument || !hasPdfExport"
-        @click="$emit('export-pdf')"
-      />
-      <RibbonButton
-        icon="print"
-        label="הדפסה"
-        variant="large"
-        :tooltip="documentTooltip('הדפסת המסמך')"
-        shortcut-id="print"
-        :disabled="!hasDocument"
-        @click="$emit('print-doc')"
-      />
+      <RibbonStack>
+        <RibbonButton
+          icon="exportPdf"
+          label="ייצוא ל-PDF"
+          variant="small"
+          :tooltip="pdfExportTooltip"
+          :disabled="!hasDocument || !hasPdfExport"
+          @click="$emit('export-pdf')"
+        />
+        <RibbonButton
+          icon="print"
+          label="הדפסה"
+          variant="small"
+          :tooltip="documentTooltip('הדפסת המסמך')"
+          shortcut-id="print"
+          :disabled="!hasDocument"
+          @click="$emit('print-doc')"
+        />
+      </RibbonStack>
     </RibbonGroup>
 
     <RibbonGroup title="יציאה">
@@ -76,12 +84,24 @@
         label="יציאה"
         variant="large"
         :tooltip="exitTooltip"
-        :disabled="isSaving"
+        :disabled="isExitBlocked"
         @click="$emit('exit-app')"
       />
     </RibbonGroup>
 
-    <RibbonGroup title="מידע">
+    <!--
+      „מידע” נצמדת לקצה השמאלי של הרצועה, כמו „עזרה” ב-Word: היא אינה שלב
+      בזרימת העבודה של הקובץ, ומקומה בקצה קבוע ולא בתור אחרי „יציאה”.
+
+      שני הפקדים נשארים **גדולים** ואינם יורדים למחסנית. הסיבה כתובה כמה
+      שורות מכאן: „קיצורים” הוא הרשימה שמי שאינו
+      יודע את הקיצורים מחפש, והקטנתו הייתה מרחיקה בדיוק את מה שההערה ההיא
+      ביקשה לקרב. קבוצה בת שני פקדים גם אינה צפופה, ואין מה לחסוך בה.
+    -->
+    <RibbonGroup
+      title="מידע"
+      end
+    >
       <!-- הפקד היחיד בלשונית בלי `:disabled`, ובכוונה: הדיאלוג הוא של התוסף,
            הוא אינו נוגע במסמך ואינו נוגע במנוע, ואין מצב שבו הוא אינו זמין.
            `:disabled="false"` קבוע היה חיווט מדומה — הוא נראה כמו תנאי ואינו
@@ -144,11 +164,13 @@
  *   * „שמור” / „שמור בשם” — `onSave` יוצא מיד בלי מסמך, ומפעיל הפעולות של
  *     הקיצורים חוסם את Ctrl+S בזמן שמירה. אותו תנאי בדיוק, ולא שני תנאים
  *     לאותה פעולה.
- *   * „ייצוא” / „הדפסה” — שניהם דורשים מסמך פתוח ולא דורשים שהוא יהיה שמור:
- *     הייצוא קורא את המצב הנוכחי, וההדפסה מדפיסה את מה שמצויר.
+ *   * „ייצוא ל-PDF” / „הדפסה” — שניהם דורשים מסמך פתוח ולא דורשים שהוא יהיה
+ *     שמור: שניהם קוראים את מה שמצויר עכשיו. לייצוא ל-PDF יש תנאי נוסף —
+ *     `hasPdfExport`, כלומר האם ה-Host מכיר את `ui.exportPdf`.
  */
 import { computed } from 'vue';
 import RibbonGroup from '../common/RibbonGroup.vue';
+import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 
 const props = withDefaults(
@@ -159,6 +181,8 @@ const props = withDefaults(
     isSaving?: boolean;
     /** האם פתיחת מסמך רצה כרגע. */
     isOpening?: boolean;
+    /** האם סגירת המסמכים והמעבר לספרייה כבר רצים. */
+    isExiting?: boolean;
     /**
      * האם ה-Host מכיר את `ui.exportPdf`.
      *
@@ -175,6 +199,7 @@ const props = withDefaults(
     hasDocument: false,
     isSaving: false,
     isOpening: false,
+    isExiting: false,
     hasPdfExport: false,
   },
 );
@@ -184,7 +209,6 @@ defineEmits<{
   (e: 'open-doc'): void;
   (e: 'save-doc'): void;
   (e: 'save-as-doc'): void;
-  (e: 'export-doc'): void;
   (e: 'print-doc'): void;
   (e: 'export-pdf'): void;
   (e: 'about'): void;
@@ -194,12 +218,15 @@ defineEmits<{
 
 /** מעבר מסמך — חדש או פתיחה. אינו דורש מסמך פתוח, אבל כן שקט מסביב. */
 const isSwitchBlocked = computed(() => props.isOpening || props.isSaving);
+/** „יציאה” אינה יכולה להתחיל שוב לפני שהניסיון הקודם הוכרע. */
+const isExitBlocked = computed(() => isSwitchBlocked.value || props.isExiting);
 
 const isSaveBlocked = computed(() => !props.hasDocument || props.isSaving);
 
 const NO_DOCUMENT = 'אין מסמך פתוח';
 const SAVING_NOW = 'השמירה רצה כרגע — רגע אחד';
 const OPENING_NOW = 'פתיחת מסמך רצה כרגע';
+const EXITING_NOW = 'סגירת המסמכים רצה כרגע — רגע אחד';
 
 /** ה-tooltip אומר **למה** הפקד מנוטרל, ולא חוזר על התווית. */
 function switchTooltip(enabledText: string): string {
@@ -231,22 +258,32 @@ const pdfExportTooltip = computed(() => {
 
 /**
  * „יציאה” אינו דורש מסמך פתוח — יציאה ממסך שאין בו מסמך היא בקשה תקפה — אבל
- * הוא כן דורש שהשמירה לא תרוץ: השאלה „לשמור לפני יציאה?” בזמן שסבב שמירה
- * באוויר הייתה מציעה שמירה שנייה על מה שנשמר כרגע.
+ * הוא כן דורש שקט מסביב, ולכן `isSwitchBlocked` כמו „מסמך חדש” ו„פתח קובץ”:
+ * בזמן שמירה השאלה „לשמור לפני יציאה?” הייתה מציעה שמירה שנייה על מה שנשמר
+ * כרגע, ובזמן פתיחה היציאה סוגרת מסמך שנטען לתוכו ברגע זה ממש.
  *
  * ה-tooltip אומר גם מה הכפתור עושה, כי „יציאה” מלשונית בתוך אוצריא אינו מובן
- * מאליו: המסמך נשאר פתוח, ומה שקורה הוא מעבר למסך הספרייה.
+ * מאליו — ומאז שהיא סוגרת, זה גם ההבדל בינה לבין „פתח ספרייה” בלשונית
+ * „אוצריא”, שהוא ניווט בלבד. הנוסח נמדד מול ההתנהגות: כל עוד היציאה לא סגרה,
+ * כתוב כאן „המסמך יישאר פתוח” בעוד הלחיצה שאלה „לצאת בלי לשמור?”.
  */
-const exitTooltip = computed(() =>
-  props.isSaving ? SAVING_NOW : 'חזרה למסך הספרייה של אוצריא; המסמך יישאר פתוח',
-);
+const exitTooltip = computed(() => {
+  if (props.isExiting) return EXITING_NOW;
+  if (props.isOpening) return OPENING_NOW;
+  if (props.isSaving) return SAVING_NOW;
+  return 'סגירת המסמך וחזרה למסך הספרייה של אוצריא';
+});
 </script>
 
 <style scoped>
+/* `width: 100%` אינו קישוט: בלעדיו הפאנל מתכווץ לרוחב תוכנו, אין מרווח פנוי,
+   ו-`margin-inline-start: auto` של קבוצת „מידע” אינו בולע דבר — ההצמדה לקצה
+   פשוט אינה קורית. ראו `.word-ribbon-group--end` ב-ribbon.css. */
 .ribbon-tab-pane {
   display: flex;
   align-items: stretch;
   gap: 0;
   height: 100%;
+  width: 100%;
 }
 </style>

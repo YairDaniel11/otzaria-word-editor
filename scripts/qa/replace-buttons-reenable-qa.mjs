@@ -20,6 +20,14 @@ import { openApp, createReport } from './harness.mjs';
 const report = createReport('כפתורי החלפה חוזרים לפעילים מיד', { strict: true });
 const app = await openApp({ name: 'replreenable', port: Number(process.env.QA_PORT ?? 9505) });
 
+/** הטקסט של כל פסקה ב-document.xml — ההוכחה לאן נכתבה הזריעה. */
+const paraTexts = (files) =>
+  ((files?.['word/document.xml'] ?? '').match(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g) ?? []).map((p) =>
+    (p.match(/<w:t[^>]*>[\s\S]*?<\/w:t>/g) ?? [])
+      .map((t) => t.replace(/<[^>]+>/g, '').replace(/[\u200e\u200f\ufeff]/g, ''))
+      .join(''),
+  );
+
 /**
  * `disabled` של כפתור **הפעולה** בכותרת התחתונה (`.fr-footer .fr-btn`),
  * לפי הטקסט שלו — לא `app.dialog()`'s controls הגנרי: "החלף" הוא גם שם
@@ -111,12 +119,30 @@ try {
   // --- תרחיש ב: "החלף הכל" ---
   await app.escape();
   await app.sleep(300);
-  await app.caret(1); // השורה השנייה, אחרי ההחלפה הקודמת
+  /*
+    הפסקה היחידה שבמסמך — זו של תרחיש א. השורה הזאת הייתה `caret(1)` עם ההערה
+    „השורה השנייה”, ושתי הטענות שגויות: אין פסקה שנייה בשלב הזה, ואינדקס 1 הוא
+    ה-`.superdoc-line` שמקונן בפסקה הראשונה. הטקסט של תרחיש ב חייב להיכנס
+    לפסקה **חדשה** אחריה, ולא לפצל אותה באמצע.
+  */
+  const beforeSplit = paraTexts(await app.docx());
+  await app.caretPara(0);
   await app.press('End', 'End', 35);
   await app.press('Enter', 'Enter', 13);
   await app.sleep(200);
   await app.type('zzq2 three zzq2 four');
   await app.sleep(600);
+
+  const afterSplit = paraTexts(await app.docx());
+  console.log('פסקאות לפני הפיצול:', JSON.stringify(beforeSplit), '| אחרי:', JSON.stringify(afterSplit));
+  if (afterSplit.length === beforeSplit.length + 1 && afterSplit[0] === beforeSplit[0] && afterSplit[1] === 'zzq2 three zzq2 four') {
+    report.pass('הזריעה של תרחיש ב נכתבה לפסקה חדשה', JSON.stringify(afterSplit));
+  } else {
+    report.fail(
+      'הזריעה של תרחיש ב לא נכתבה לפסקה חדשה — הסמן לא היה בסוף הפסקה שנבחרה',
+      `לפני ${JSON.stringify(beforeSplit)} אחרי ${JSON.stringify(afterSplit)}`,
+    );
+  }
 
   await app.click('החלפה');
   await app.sleep(600);

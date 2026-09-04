@@ -7,9 +7,8 @@
  * *שם*. אם הכלל יתהפך, כפתור „מודגש” יקבל טולטיפ ריק-כותרת — וזה נראה רק
  * בעין, ורק אם מרחפים דווקא עליו.
  *
- * הנפילה לתכונת `title` נבדקת גם היא: היא מה שמעביר את הפס העליון, שורת המצב
- * ולוח הצבעים לעיצוב החדש בלי לגעת בהם, ובלעדיה הם היו חוזרים למלבן האפור של
- * מערכת ההפעלה.
+ * `readTip` קוראת תכונות `data-tip-*` בלבד. שהיא **אינה** נופלת ל-`title` הוא
+ * חלק מהחוזה ולא השמטה — ההסבר למטה, ליד הבדיקה עצמה.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -98,7 +97,6 @@ describe('readTip', () => {
       [TIP_TITLE_ATTR]: 'מברשת עיצוב',
       [TIP_SHORTCUT_ATTR]: 'Ctrl+Shift+C',
       [TIP_DESCRIPTION_ATTR]: 'העתק עיצוב ממקום אחד והחל במקום אחר',
-      title: 'מברשת עיצוב (Ctrl+Shift+C)',
     });
 
     expect(readTip(element)).toEqual({
@@ -108,27 +106,19 @@ describe('readTip', () => {
     });
   });
 
-  it('פקד שלא חווט נופל לתכונת title — וזה מה שמכסה את כל התוכנה', () => {
-    expect(readTip(elementWith({ title: 'מספר מילים במסמך' }))).toEqual({
-      title: 'מספר מילים במסמך',
-      shortcut: '',
-      description: '',
-    });
-  });
-
-  it('data-tip-title גובר על title, שנושא גם את הצירוף בסוגריים', () => {
-    const element = elementWith({
-      [TIP_TITLE_ATTR]: 'מודגש',
-      [TIP_SHORTCUT_ATTR]: 'Ctrl+B',
-      title: 'מודגש (Ctrl+B)',
-    });
-
-    expect(readTip(element)?.title).toBe('מודגש');
+  /**
+   * זו הצהרה, לא השמטה. `title` הוא מה שמצייר את המלבן האפור של מערכת ההפעלה
+   * מעל הכרטיס, ולכן הוא אינו קיים באף אלמנט בתוכנה — ואינו מקור לטולטיפ.
+   * לו `readTip` הייתה נופלת אליו, פקד ששכחו להמיר היה מקבל *שני* טולטיפים
+   * במקום להישאר בלי אחד, וזה בדיוק מה שהופך את השכחה לבלתי נראית.
+   */
+  it('פקד שכל תוכנו `title` אינו עוגן', () => {
+    expect(readTip(elementWith({ title: 'מספר מילים במסמך' }))).toBeNull();
   });
 
   it('אלמנט בלי שום מקור אינו עוגן', () => {
     expect(readTip(elementWith({}))).toBeNull();
-    expect(readTip(elementWith({ title: '   ' }))).toBeNull();
+    expect(readTip(elementWith({ [TIP_TITLE_ATTR]: '   ' }))).toBeNull();
   });
 
   it('הסבר בלבד, בלי כותרת, עדיין עוגן', () => {

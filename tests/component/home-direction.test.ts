@@ -22,12 +22,12 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
-import { autoUnmount, buttonByTitle, createSuperdocDouble, mountUi, settle } from './harness';
+import { autoUnmount, buttonByTip, createSuperdocDouble, mountUi, settle } from './harness';
 
 autoUnmount();
 
-const RTL_TITLE = 'כיוון פסקה מימין לשמאל';
-const LTR_TITLE = 'כיוון פסקה משמאל לימין';
+const RTL_TIP = 'כיוון פסקה מימין לשמאל';
+const LTR_TIP = 'כיוון פסקה משמאל לימין';
 
 describe('כיוון פסקה — חיווי „פעיל” נקרא מה-pPr, לא מהפקודה', () => {
   it('לחיצה על „מימין לשמאל” מדליקה את החיווי מיד, בלי לחכות לתזוזת סמן', async () => {
@@ -40,13 +40,13 @@ describe('כיוון פסקה — חיווי „פעיל” נקרא מה-pPr, �
 
     // לפני הלחיצה: אין עדיין קריאה שהתיישבה (ה-debounce עוד לא רץ), ולכן
     // נופלים לברירת המחדל של כפיל הפקודה — כמו לפני התיקון.
-    expect(buttonByTitle(harness.wrapper, RTL_TITLE).attributes('aria-pressed')).toBe('false');
+    expect(buttonByTip(harness.wrapper, RTL_TIP).attributes('aria-pressed')).toBe('false');
 
-    await buttonByTitle(harness.wrapper, RTL_TITLE).trigger('click');
+    await buttonByTip(harness.wrapper, RTL_TIP).trigger('click');
     await settle();
 
-    expect(buttonByTitle(harness.wrapper, RTL_TITLE).attributes('aria-pressed')).toBe('true');
-    expect(buttonByTitle(harness.wrapper, LTR_TITLE).attributes('aria-pressed')).toBe('false');
+    expect(buttonByTip(harness.wrapper, RTL_TIP).attributes('aria-pressed')).toBe('true');
+    expect(buttonByTip(harness.wrapper, LTR_TIP).attributes('aria-pressed')).toBe('false');
     expect(harness.failures()).toEqual([]);
   });
 
@@ -55,11 +55,11 @@ describe('כיוון פסקה — חיווי „פעיל” נקרא מה-pPr, �
     const harness = mountUi(HomeTab, { superdoc });
     await settle();
 
-    await buttonByTitle(harness.wrapper, LTR_TITLE).trigger('click');
+    await buttonByTip(harness.wrapper, LTR_TIP).trigger('click');
     await settle();
 
-    expect(buttonByTitle(harness.wrapper, LTR_TITLE).attributes('aria-pressed')).toBe('true');
-    expect(buttonByTitle(harness.wrapper, RTL_TITLE).attributes('aria-pressed')).toBe('false');
+    expect(buttonByTip(harness.wrapper, LTR_TIP).attributes('aria-pressed')).toBe('true');
+    expect(buttonByTip(harness.wrapper, RTL_TIP).attributes('aria-pressed')).toBe('false');
     expect(harness.failures()).toEqual([]);
   });
 
@@ -74,8 +74,8 @@ describe('כיוון פסקה — חיווי „פעיל” נקרא מה-pPr, �
       await vi.advanceTimersByTimeAsync(500);
       await settle();
 
-      expect(buttonByTitle(harness.wrapper, RTL_TITLE).attributes('aria-pressed')).toBe('true');
-      expect(buttonByTitle(harness.wrapper, LTR_TITLE).attributes('aria-pressed')).toBe('false');
+      expect(buttonByTip(harness.wrapper, RTL_TIP).attributes('aria-pressed')).toBe('true');
+      expect(buttonByTip(harness.wrapper, LTR_TIP).attributes('aria-pressed')).toBe('false');
     } finally {
       vi.useRealTimers();
     }
@@ -89,15 +89,15 @@ describe('כיוון פסקה — חיווי „פעיל” נקרא מה-pPr, �
       await settle();
       await vi.advanceTimersByTimeAsync(500);
       await settle();
-      expect(buttonByTitle(harness.wrapper, RTL_TITLE).attributes('aria-pressed')).toBe('true');
+      expect(buttonByTip(harness.wrapper, RTL_TIP).attributes('aria-pressed')).toBe('true');
 
       const ltrDoc = createSuperdocDouble({ paragraphProps: { bidi: false } });
       await harness.setSuperdoc(ltrDoc);
       await vi.advanceTimersByTimeAsync(500);
       await settle();
 
-      expect(buttonByTitle(harness.wrapper, RTL_TITLE).attributes('aria-pressed')).toBe('false');
-      expect(buttonByTitle(harness.wrapper, LTR_TITLE).attributes('aria-pressed')).toBe('true');
+      expect(buttonByTip(harness.wrapper, RTL_TIP).attributes('aria-pressed')).toBe('false');
+      expect(buttonByTip(harness.wrapper, LTR_TIP).attributes('aria-pressed')).toBe('true');
     } finally {
       vi.useRealTimers();
     }
@@ -112,8 +112,8 @@ describe('כיוון פסקה — חיווי „פעיל” נקרא מה-pPr, �
       await vi.advanceTimersByTimeAsync(500);
       await settle();
 
-      expect(buttonByTitle(harness.wrapper, RTL_TITLE).attributes('aria-pressed')).toBe('false');
-      expect(buttonByTitle(harness.wrapper, LTR_TITLE).attributes('aria-pressed')).toBe('false');
+      expect(buttonByTip(harness.wrapper, RTL_TIP).attributes('aria-pressed')).toBe('false');
+      expect(buttonByTip(harness.wrapper, LTR_TIP).attributes('aria-pressed')).toBe('false');
     } finally {
       vi.useRealTimers();
     }

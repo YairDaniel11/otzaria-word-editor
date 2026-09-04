@@ -19,7 +19,8 @@
         <button
           type="button"
           class="ld-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את הוספת הקישור"
           @click="$emit('close')"
         >

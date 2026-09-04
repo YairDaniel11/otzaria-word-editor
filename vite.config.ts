@@ -1,5 +1,10 @@
 import { defineConfig, type Plugin } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { TORAH_DICTIONARY_FILE, TORAH_DICTIONARY_GLOBAL } from './src/engine/spellcheck';
+import { patchBlankDocumentXml, patchBlankStylesXml } from './src/engine/blank-document';
+import { deriveHebrewBlankDocx } from './scripts/blank-docx';
 
 /**
  * ל-WebView2 של Windows אין תמיכה ב-<script type="module"> מ-file:// ,
@@ -9,9 +14,9 @@ import vue from '@vitejs/plugin-vue';
  *
  * ומעבר לכך: Vite מזריק את תגית הכניסה ל-`<head>`, וסקריפט קלאסי שם חוסם את
  * פריסת ה-HTML — כלומר ה-`<body>`, ובתוכו מסך הטעינה, אינו נפרס עד ששני
- * הבאנדלים (16MB יחד) נפרסו והורצו. זה בדיוק המסך הלבן שנמדד
- * ב-`scripts/startup-probe.mjs`: צביעה ראשונה ב-1619ms מ-`file://`, כולה
- * המתנה. שום דבר לא נכשל; פשוט לא היה מה לראות.
+ * הבאנדלים (‏17MB יחד) נפרסו והורצו. זה בדיוק המסך הלבן שנמדד
+ * ב-`scripts/startup-probe.mjs` — שם המספר, ורק שם. שום דבר לא נכשל; פשוט
+ * לא היה מה לראות.
  *
  * לכן שתי התגיות מוסרות מה-HTML, ובמקומן נכנס טוען inline שמזריק אותן אחרי
  * הצביעה הראשונה — ומדווח למסך הטעינה בין השלבים. הצביעה ירדה ל-50ms.
@@ -78,9 +83,45 @@ function deferredEntry(): Plugin {
 
              בצורה הזאת כל תחנה מדווחת ברגע שהיא אכן נכונה: כאן הבאנדל של
              המנוע מתחיל לרדת, ובסיום שלו app.js מתחיל להיפרס. */
+          /* חימום worker המסמך, ברגע ש-engine-workers.js הציב את המקורות —
+             כלומר בזמן ש-app.js (12MB) עוד נפרס. ‏Worker זמני על ה-blob URL
+             מקמפל את ~4.6MB קוד ה-worker במקביל לפריסה הזאת, ומושלך ברגע
+             שאיתת שעלה; כשהמנוע יקים Worker על **אותו URL** הקומפילציה כבר
+             חמה (נמדד: ‏~210ms במקום ~325ms). לכן ה-URL נשמר על window,
+             ו-engine/workers.ts מאמץ אותו במקום לבנות URL חדש — blob אחר,
+             גם עם אותו תוכן, אינו פוגע ב-cache.
+
+             חימום שנכשל אינו נוגע בעלייה: ה-catch בולע, ו-workers.ts בונה
+             את ה-URL בעצמו כשהגלובל חסר. השם __otzariaDocWorkerUrl משותף
+             עם src/engine/workers.ts. */
+          function warm() {
+            try {
+              var sources = window.__SUPERDOC_WORKER_SOURCES__;
+              if (!sources || !sources.document || typeof Worker !== 'function') return;
+              var url = URL.createObjectURL(new Blob([sources.document], { type: 'text/javascript' }));
+              window.__otzariaDocWorkerUrl = url;
+              // Worker קלאסי, ובמכוון — אל תוסיפו כאן type: 'module'.
+              //
+              // ה-code cache ממופתח גם בסוג הסקריפט, ולכן probe מסוג אחר
+              // מזה שהמנוע יוצר לא היה מחמם דבר. מה המנוע יוצר בפועל נמדד
+              // (עטיפת window.Worker לפני העלייה, על ה-dist הארוז מ-file://):
+              // Worker **קלאסי** בשם superdoc-v2-edit, על אותו URL בדיוק.
+              // ובאותה מדידה: Worker מסוג module על blob URL טרי נכשל כאן
+              // מיד (‏~10ms, גם על סקריפט של 14 בתים) — module workers מ-blob
+              // חסומים ב-origin האטום של file://. כלומר probe כזה היה מת
+              // בשקט, ומבטל את החימום כולו.
+              var probe = new Worker(url);
+              function drop() { try { probe.terminate(); } catch (ignored) {} }
+              probe.addEventListener('message', drop, { once: true });
+              probe.addEventListener('error', drop, { once: true });
+              // רשת ביטחון בלבד: ‏ה-worker מודיע מיוזמתו תוך ~70ms (נמדד),
+              // ואז הוא נזרק שם. הקומפילציה נשמרת ב-cache גם אחרי שהוא מת.
+              setTimeout(drop, 10000);
+            } catch (ignored) { /* חימום הוא קיצור, לא תנאי */ }
+          }
           say({ at: 22, text: 'טוען את מנוע המסמכים…' });
           [
-            { src: '${WORKERS_SRC}', next: { at: 55, text: 'מרכיב את הממשק…' } },
+            { src: '${WORKERS_SRC}', next: { at: 55, text: 'מרכיב את הממשק…' }, warm: true },
             { src: '${match[1]}', next: null }
           ].forEach(function (step) {
             var script = document.createElement('script');
@@ -88,6 +129,7 @@ function deferredEntry(): Plugin {
             script.src = step.src;
             script.addEventListener('load', function () {
               say(step.next);
+              if (step.warm) warm();
             });
             script.addEventListener('error', function () {
               if (splash) splash.fail('טעינת קוד התוסף נכשלה');
@@ -182,9 +224,117 @@ function inlineEngineWorkers(): Plugin {
   };
 }
 
+/**
+ * המילון התורני יוצא כנכס נפרד — לא לתוך `assets/app.js`.
+ *
+ * ה-build הוא IIFE אחד עם `inlineDynamicImports: true`, ולכן כל צורת `import`
+ * של הנתונים — כולל `await import()` — הייתה נבלעת לבאנדל הראשי: 1.3MB שכל
+ * משתמש פורס בעלייה בשביל תכונה שברירת המחדל שלה כבויה. הנכס הזה נטען
+ * בהזרקת `<script>` בזמן ריצה, ורק כשהמשתמש מדליק את הבדיקה — ראו
+ * `src/engine/spellcheck-dictionary.ts`, שם גם ההסבר למה `<script>` ולא
+ * `fetch` (‏`file://` עם origin opaque).
+ *
+ * הפלט הוא ליטרל תבנית (backtick) ולא `JSON.parse`: המילון הוא עברית, גרש
+ * וגרשיים בלבד — 29 תווים שאף אחד מהם אינו דורש escaping בליטרל תבנית —
+ * ולכן `\n` נשאר תו אחד במקום ארבעה בתים של `\\n`. ההפרש נמדד: 1.31MB מול
+ * 1.55MB לאותם נתונים בדיוק. `build` מוודא שההנחה מחזיקה, כי תו בודד שיברח
+ * (backtick, `$`, לוכסן הפוך) היה מייצר קובץ JS פגום — כלומר תוסף שנפרס
+ * ונשבר, ולא בנייה שנכשלת — ובאותה הזדמנות גם את המיון ואת אורך הערכים,
+ * שני דברים ש-`createDictionary` מניח ואיש אינו בודק.
+ */
+function torahDictionaryAsset(): Plugin {
+  const SOURCE = fileURLToPath(new URL('./src/data/torah-dictionary.txt', import.meta.url));
+  /** עברית, גרש וגרשיים ישרים, ומפריד השורות. שום דבר אחר. */
+  const PACKABLE = /^[\u05D0-\u05EA"'\n]+$/;
+  /** הערך הקצר ביותר שמותר. ערך בן תו אחד היה מכשיר כמעט כל מחרוזת. */
+  const MIN_LENGTH = 2;
+
+  /**
+   * שלוש טענות על קובץ הנתונים, ולא רק זו שנוגעת לאריזה.
+   *
+   * ה-`PACKABLE` בלבד שומר על **בטיחות ליטרל התבנית** — שתו בורח לא ייצר
+   * קובץ JS פגום. אבל `createDictionary` מניח שתי הנחות נוספות שאיש לא בדק:
+   * שהרשימה **ממוינת לפי יחידות UTF-16** (בלי זה החיפוש הבינארי פשוט לא
+   * מוצא חלק מהערכים, בשקט), ושאין בה שורות ריקות או ערכים בני תו אחד.
+   * הקובץ הוא נתונים שנערכים ביד — מילה שתתווסף במקום הלא נכון היא בדיוק
+   * הדבר שיישאר ירוק בכל בדיקה אחרת.
+   */
+  function build(): string {
+    const packed = readFileSync(SOURCE, 'utf8').replace(/\r\n?/g, '\n').trim();
+
+    if (!PACKABLE.test(packed)) {
+      throw new Error(
+        `${TORAH_DICTIONARY_FILE}: המילון מכיל תו שאינו עברית/גרש/גרשיים — ליטרל תבנית אינו בטוח עבורו. ` +
+          'בדקו את src/data/torah-dictionary.txt.',
+      );
+    }
+
+    const words = packed.split('\n');
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i]!;
+      if (word.length < MIN_LENGTH) {
+        throw new Error(
+          `${TORAH_DICTIONARY_FILE}: שורה ${i + 1} קצרה מ-${MIN_LENGTH} תווים (${JSON.stringify(word)}). ` +
+            'ערך בן תו אחד או שורה ריקה מכשירים כמעט כל מחרוזת.',
+        );
+      }
+      if (i > 0 && !(words[i - 1]! < word)) {
+        throw new Error(
+          `${TORAH_DICTIONARY_FILE}: שורות ${i} ו-${i + 1} אינן בסדר עולה ` +
+            `(${JSON.stringify(words[i - 1])} ואז ${JSON.stringify(word)}). ` +
+            'החיפוש הבינארי מניח מיון לפי יחידות UTF-16, וללא מיון הוא מפספס ערכים בשקט.',
+        );
+      }
+    }
+
+    return `window.${TORAH_DICTIONARY_GLOBAL} = \`${packed}\`;\n`;
+  }
+
+  return {
+    name: 'otzaria-torah-dictionary',
+
+    // בפיתוח אין `emitFile`, ולכן אותו תוכן בדיוק מוגש מהזיכרון — כדי
+    // שהמסלול שנבדק ידנית יהיה המסלול שנארז.
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!req.url || req.url.split('?')[0] !== `/${TORAH_DICTIONARY_FILE}`) return next();
+        res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+        res.end(build());
+      });
+    },
+
+    // `generateBundle` רץ ב-build בלבד; ב-dev ה-middleware שמעל הוא המסלול.
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: TORAH_DICTIONARY_FILE, source: build() });
+    },
+  };
+}
+
+const BLANK_DOCX_MODULE = 'virtual:otzaria-blank-docx';
+
+/**
+ * תבנית „מסמך חדש” עברית, כ-base64 במודול וירטואלי. נגזרת מהמסמך הריק של
+ * המנוע בכל בנייה — ראו src/engine/blank-document.ts. נכס נפרד לא היה עובד:
+ * `fetch` מ-file:// חסום (origin opaque), כמו במילון.
+ */
+function hebrewBlankDocx(): Plugin {
+  const resolved = `\0${BLANK_DOCX_MODULE}`;
+  return {
+    name: 'otzaria-hebrew-blank-docx',
+    resolveId(id) {
+      return id === BLANK_DOCX_MODULE ? resolved : undefined;
+    },
+    load(id) {
+      if (id !== resolved) return undefined;
+      const docx = deriveHebrewBlankDocx({ patchDocument: patchBlankDocumentXml, patchStyles: patchBlankStylesXml });
+      return `export default ${JSON.stringify(docx.toString('base64'))};\n`;
+    },
+  };
+}
+
 export default defineConfig({
   base: './',
-  plugins: [vue(), inlineEngineWorkers(), deferredEntry()],
+  plugins: [vue(), hebrewBlankDocx(), torahDictionaryAsset(), inlineEngineWorkers(), deferredEntry()],
   worker: { format: 'iife' },
 
   // ברירת המחדל של Vite ב-build היא legalComments: 'none', והיא מוחקת את באנר
@@ -197,6 +347,11 @@ export default defineConfig({
   // ה-URL היחסי מצביע לשם — ושם אין קובץ worker, כלומר המסמך לא נפתח בפיתוח.
   // החרגה מה-optimizer משאירה את המנוע במקומו, ואת ה-URL נפתר.
   optimizeDeps: { exclude: ['@superdoc/docx-engine'] },
+
+  // PORT מכובד כשהוא מוגדר: כלי תצוגה (וכל סביבת עבודה עם כמה שרתי פיתוח
+  // במקביל) מקצים פורט דרך משתנה הסביבה, ו-Vite מעצמו קורא רק --port.
+  // בלי זה שרת שני נופל ל-5174 בעוד הכלי מצביע על הפורט שהקצה — דף ריק.
+  server: process.env.PORT ? { port: Number(process.env.PORT), strictPort: true } : undefined,
 
   build: {
     target: 'es2020',

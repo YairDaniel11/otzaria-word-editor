@@ -19,7 +19,8 @@
         <button
           type="button"
           class="shortcuts-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את רשימת הקיצורים"
           @click="$emit('close')"
         >
@@ -28,8 +29,8 @@
       </div>
 
       <!--
-        `tabindex="0"` כדי שאפשר יהיה לגלול במקלדת: 56 רשומות בגובה 84vh
-        גולשות, ובדיאלוג יש שתי תחנות Tab בלבד — ואף אחת מהן אינה גוללת.
+        `tabindex="0"` כדי שאפשר יהיה לגלול במקלדת: שמונים הרשומות בגובה
+        84vh גולשות, ובדיאלוג יש שתי תחנות Tab בלבד — ואף אחת מהן אינה גוללת.
       -->
       <div
         class="shortcuts-body"

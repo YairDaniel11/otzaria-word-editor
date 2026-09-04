@@ -35,36 +35,49 @@ try {
   }
 
   // --- רשימות ---
-  const listRes = await app.js(`(async function(){
-    var doc = window.__otzariaEditor.superdoc.activeEditor.doc;
-    var out = {};
-    try {
-      var lst = await doc.lists.apply({ preset: 'decimal' });
-      out.apply = lst;
-    } catch (e) { out.applyErr = String(e && e.message || e); }
-    try {
-      var listing = await doc.lists.list();
-      out.listing = listing;
-    } catch (e) { out.listErr = String(e && e.message || e); }
-    return JSON.stringify(out);
-  })()`);
-  console.log('החלת רשימה:', String(listRes).slice(0, 600));
+  //
+  // דרך היצירה היא הפקודה `numbered-list`, לא `doc.lists.apply`: זה מה
+  // שהאפליקציה עושה (HomeTab.vue → useCommand), ו-`lists.apply` דורש
+  // `target` שאין לו מקבילה בקוד שלנו. הגרסה הקודמת של השער קראה לו בלי
+  // `target`, קיבלה „lists.apply target must be an object", ומכאן ואילך
+  // מדדה מסמך שאין בו רשימה בכלל — כלומר דיווחה „שבור" על יכולת שלא נוסתה.
+  await app.caret(0);
+  await app.press('Enter', 'Enter', 13);
+  await app.type('alef');
+  await app.press('Enter', 'Enter', 13);
+  await app.type('bet');
+  await app.sleep(900);
 
+  const applied = await app.js(`(async function(){
+    var ui = window.__otzariaEditor.ui;
+    try { return JSON.stringify(await ui.commands.executeAsync('numbered-list')); }
+    catch (e) { return JSON.stringify({ err: String(e && e.message || e) }); }
+  })()`);
+  console.log('הפעלת „מספור":', String(applied).slice(0, 300));
+  await app.sleep(1400);
+
+  // אותו פתרון יעד בדיוק כמו src/engine/lists.ts: `blockId` מהבחירה,
+  // ו-`nodeType: 'listItem'` מ-`blocks.list`. יעד בצורה אחרת נדחה.
   const styleRes = await app.js(`(async function(){
     var doc = window.__otzariaEditor.superdoc.activeEditor.doc;
     var out = {};
     try {
-      var listing = await doc.lists.list();
-      var items = (listing && (listing.items || listing.lists || listing.data)) || [];
-      out.count = items.length;
-      out.first = items[0] || null;
-      var numId = items[0] && (items[0].numId || items[0].id);
-      out.numId = numId;
-      if (numId != null) {
-        try {
-          out.set = await doc.lists.setLevelNumberStyle({ numId: numId, level: 0, numberStyle: 'hebrew1' });
-        } catch (e) { out.setErr = String(e && e.message || e); }
+      var info = await doc.selection.current();
+      var segs = (info && info.target && info.target.segments) || [];
+      var blockId = null;
+      for (var i = 0; i < segs.length; i++) {
+        if (typeof segs[i].blockId === 'string') { blockId = segs[i].blockId; break; }
       }
+      out.blockId = blockId;
+      var listed = await doc.blocks.list();
+      var block = ((listed && listed.blocks) || []).filter(function(b){ return b.nodeId === blockId; })[0];
+      out.nodeType = block && block.nodeType;
+      if (!block || block.nodeType !== 'listItem') { out.err = 'הסמן אינו בפריט רשימה'; return JSON.stringify(out); }
+      out.set = await doc.lists.setLevelNumberStyle({
+        target: { kind: 'block', nodeType: 'listItem', nodeId: block.nodeId },
+        level: 0,
+        numberStyle: 'hebrew1',
+      });
     } catch (e) { out.err = String(e && e.message || e); }
     return JSON.stringify(out);
   })()`);
@@ -78,7 +91,7 @@ try {
   console.log('טקסט על המסך:', JSON.stringify((await app.screenText() || '').slice(0, 200)));
 
   if (fmts.includes('hebrew1')) report.pass('מספור רשימה — hebrew1 נכתב ל-numbering.xml', fmts.join(','));
-  else report.fail('מספור רשימה — hebrew1', `numFmt שנמצאו: ${fmts.join(',') || 'אין'}`);
+  else report.fail('מספור רשימה — hebrew1', `${styleRes} | numFmt שנמצאו: ${fmts.join(',') || 'אין'}`);
 
   console.log('לוג הדף:', JSON.stringify(await app.log()));
 } finally {

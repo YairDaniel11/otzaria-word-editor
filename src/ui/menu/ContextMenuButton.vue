@@ -8,8 +8,9 @@
     :aria-checked="entry.toggle ? (isActive ? 'true' : 'false') : undefined"
     :aria-disabled="isDisabled ? 'true' : undefined"
     :tabindex="focused ? 0 : -1"
-    :title="layout === 'icons' ? title : undefined"
-    :aria-label="layout === 'icons' ? title : undefined"
+    :data-tip-title="layout === 'icons' ? entry.label : undefined"
+    :data-tip-shortcut="layout === 'icons' && shortcut ? shortcut : undefined"
+    :aria-label="layout === 'icons' ? accessibleName : undefined"
     @click="onClick"
   >
     <SvgIcon
@@ -115,18 +116,17 @@ const isActive = computed(() => shown.value?.active === true);
 const shortcut = computed(() => (props.entry.shortcutId ? shortcutLabel(props.entry.shortcutId) : ''));
 
 /**
- * שם הפקד — ומחרוזת הטולטיפ, אבל **רק בשורת האייקונים**.
+ * השם הנגיש — **רק בשורת האייקונים**, ורק שם גם הטולטיפ (בתבנית).
  *
- * שורת כתיבה כבר אומרת את שמה על המסך ואת הצירוף שלה לצדו. `title` עליה היה
- * מייצר כפילות כפולה: גם הטולטיפ של מערכת ההפעלה, וגם כרטיס הטולטיפ של
- * התוסף — `ui/tooltip/TooltipLayer.vue` מרים כרטיס לכל פקד שיש לו `title`,
- * גם בלי `data-tip-*` (נמדד ב-check:tooltip). כלומר ריחוף על „קישור…” היה
- * פותח כרטיס שכתוב בו „קישור…”, מעל התפריט. גם Word אינו עושה זאת.
+ * שורת כתיבה כבר אומרת את שמה על המסך ואת הצירוף שלה לצדו, ולכן היא אינה
+ * מצהירה על `data-tip-*` כלל: כרטיס שכתוב בו „קישור…” מעל השורה שכתוב בה
+ * „קישור…” הוא כפילות. גם Word אינו עושה זאת.
  *
- * באייקון אין תווית גלויה, ולכן שם הטולטיפ הוא הדבר היחיד שאומר מה הפקד עושה
- * — והצירוף נכנס אליו.
+ * באייקון אין תווית גלויה, ולכן הצירוף נכנס לשם הנגיש — הוא הדבר היחיד שיאמר
+ * אותו לקורא מסך. בכרטיס עצמו הוא שדה נפרד (`data-tip-shortcut`) ולא סוגריים
+ * בסוף מחרוזת.
  */
-const title = computed(() =>
+const accessibleName = computed(() =>
   shortcut.value ? `${props.entry.label} (${shortcut.value})` : props.entry.label,
 );
 

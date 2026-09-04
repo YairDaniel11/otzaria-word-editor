@@ -13,7 +13,7 @@
         type="button"
         class="style-card"
         :class="{ active: activeId === item.id }"
-        :title="menuString(item.label)"
+        :data-tip-title="menuString(item.label)"
         :aria-pressed="activeId === item.id"
         :disabled="disabled"
         @pointerdown.prevent
@@ -39,7 +39,7 @@
         v-if="canScrollStart"
         type="button"
         class="nav-btn"
-        :title="menuString('הסגנונות הקודמים')"
+        :data-tip-title="menuString('הסגנונות הקודמים')"
         :aria-label="menuString('הסגנונות הקודמים')"
         @pointerdown.prevent
         @click="scrollToward('start')"
@@ -53,7 +53,7 @@
         v-if="canScrollEnd"
         type="button"
         class="nav-btn"
-        :title="menuString('הסגנונות הבאים')"
+        :data-tip-title="menuString('הסגנונות הבאים')"
         :aria-label="menuString('הסגנונות הבאים')"
         @pointerdown.prevent
         @click="scrollToward('end')"
@@ -199,7 +199,9 @@ watch(items, () => void nextTick(measure));
   border: 1px solid var(--color-outline-variant);
   border-radius: var(--radius-sm);
   padding: 2px;
-  height: 68px;
+  /* בדיוק גובה התוכן של קבוצה — הגלריה יושבת לצד כפתורים גדולים, וכל מספר
+     שאינו הטוקן היה משאיר אותה נמוכה או גבוהה מהם. ראו tokens.css. */
+  height: var(--ribbon-content-h);
   /* מהודקת לתוכן. `width: 100%` עם `flex: 1 1 auto` שהיו כאן מתחו אותה על כל
      מה שהקבוצה נתנה, והשאירו לצד הכרטיסים שטח לבן שנראה כמו משבצת סגנון
      ריקה — זו התלונה. `0 1 auto` = אינה גדלה, ומצטמצמת כשהרצועה צרה. */

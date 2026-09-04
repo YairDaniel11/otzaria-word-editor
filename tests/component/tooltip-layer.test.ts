@@ -1,14 +1,23 @@
 /**
  * שכבת הטולטיפ — ui/tooltip/TooltipLayer.vue.
  *
- * ## התקלה שהבדיקה הזאת שומרת עליה
+ * ## מה שהיה כאן, ולמה הוא נמחק
  *
- * הכרטיס מכבה את הטולטיפ המולד בכך שהוא מסיר את `title` מהעוגן הפעיל. בפקד
- * שיש לו **רק** `title` — הפס העליון, שורת המצב, לוח הצבעים, בוררי הגופן —
- * התכונה הזאת היא בדיוק מה שהפך אותו לעוגן, ועם הסרתה הוא חדל להיות כזה.
- * נמדד ב-Chrome על ה-dist הארוז, על `.word-app-badge`: ריחוף פותח את הכרטיס,
- * ותזוזה של פיקסל אחד סוגרת אותו — ואחרי 400ms הוא נפתח שוב. הבהוב, ודווקא
- * על כל מה שהכיסוי-ללא-חיווט הבטיח.
+ * הגרסה הראשונה השאירה `title` על הפקדים והסירה אותו בריחוף, כדי שמערכת ההפעלה
+ * לא תצייר מלבן אפור מעל הכרטיס. הבדיקות כאן שמרו על מנגנון ההשאלה הזה: פקד
+ * שכל תוכנו `title` חדל להיות עוגן ברגע שהתכונה ירדה ממנו, ולכן היא הועברה
+ * ל-`data-tip-title` לאורך ההשהיה.
+ *
+ * כל זה נמחק, כי המנגנון לא עבד: הדפדפן קורא את `title` בתזוזת העכבר ולא כשהוא
+ * מצייר, כך שהטקסט נלכד כבר בתזוזה שבה הסמן נעצר וההסרה שאחריה אינה מבטלת דבר.
+ * המשתמש צילם את שני הטולטיפים זה מעל זה. היום `title` אינו קיים באף אלמנט
+ * בתוכנה (tests/unit/native-title.test.ts אוכף זאת), והשכבה אינה נוגעת בתכונות
+ * של הפקדים כלל.
+ *
+ * ## מה כן נמדד כאן
+ *
+ * ההתנהגות שנשארה: פתיחה בהשהיה, מעבר בין פקדים, סגירה בלחיצה, וההבהוב שנמדד
+ * ב-Chrome — תזוזה של פיקסל אחד על אותו פקד אינה סוגרת את הכרטיס.
  *
  * ## למה `elementFromPoint` מזויף כאן
  *
@@ -39,6 +48,24 @@ function pointerMove(target: Element, x: number, y: number): void {
   document.dispatchEvent(event);
 }
 
+function pointerDown(target: Element, x: number, y: number): void {
+  const event = new MouseEvent('pointerdown', { bubbles: true, clientX: x, clientY: y });
+  Object.defineProperty(event, 'target', { value: target });
+  document.dispatchEvent(event);
+}
+
+/** פקד שמצהיר על טולטיפ, כפי שכל פקד בתוכנה עושה היום. */
+function control(attributes: Record<string, string>): HTMLElement {
+  const button = document.createElement('button');
+  for (const [name, value] of Object.entries(attributes)) button.setAttribute(name, value);
+  document.body.appendChild(button);
+  return button;
+}
+
+function mountLayer(): void {
+  wrapper = mount(TooltipLayer, { attachTo: document.body });
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   (document as unknown as { elementFromPoint: (x: number, y: number) => Element | null })
@@ -53,38 +80,37 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('הטולטיפ על פקד שכל תוכנו title', () => {
-  function mountOverBadge(): HTMLElement {
-    const badge = document.createElement('div');
-    badge.setAttribute('title', 'וורד לאוצריא');
-    document.body.appendChild(badge);
-    hit = badge;
-    wrapper = mount(TooltipLayer, { attachTo: document.body });
-    return badge;
-  }
+describe('הכרטיס', () => {
+  it('נפתח אחרי ההשהיה, עם שלושת השדות', async () => {
+    const bold = control({
+      'data-tip-title': 'מודגש',
+      'data-tip-shortcut': 'Ctrl+B',
+      'data-tip-desc': 'מעבה את הטקסט המסומן',
+    });
+    hit = bold;
+    mountLayer();
 
-  it('נפתח, ומכבה את הטולטיפ המולד', async () => {
-    const badge = mountOverBadge();
+    pointerMove(bold, 10, 10);
+    expect(wrapper!.find('.word-tip').exists()).toBe(false);
 
-    pointerMove(badge, 10, 10);
     vi.advanceTimersByTime(SHOW_DELAY_MS + 20);
     await wrapper!.vm.$nextTick();
 
-    expect(wrapper!.find('.word-tip').exists()).toBe(true);
-    expect(wrapper!.find('.word-tip__title').text()).toBe('וורד לאוצריא');
-    // המלבן האפור של מערכת ההפעלה כבוי — זו הסיבה שהתכונה מוסרת בכלל.
-    expect(badge.getAttribute('title')).toBeNull();
+    expect(wrapper!.find('.word-tip__title').text()).toBe('מודגש');
+    expect(wrapper!.find('.word-tip__key').text()).toBe('Ctrl+B');
+    expect(wrapper!.find('.word-tip__desc').text()).toBe('מעבה את הטקסט המסומן');
   });
 
-  it('שורד תזוזת עכבר נוספת על אותו פקד — זה ההבהוב שנמדד', async () => {
-    const badge = mountOverBadge();
+  it('שורד תזוזת עכבר נוספת על אותו פקד — זה ההבהוב שנמדד ב-Chrome', async () => {
+    const badge = control({ 'data-tip-title': 'וורד לאוצריא' });
+    hit = badge;
+    mountLayer();
 
     pointerMove(badge, 10, 10);
     vi.advanceTimersByTime(SHOW_DELAY_MS + 20);
     await wrapper!.vm.$nextTick();
     expect(wrapper!.find('.word-tip').exists()).toBe(true);
 
-    // פיקסל אחד. בקוד השבור העוגן כבר אינו נמצא, ו-scheduleHide רץ.
     pointerMove(badge, 11, 11);
     vi.advanceTimersByTime(HIDE_DELAY_MS);
     await wrapper!.vm.$nextTick();
@@ -92,8 +118,10 @@ describe('הטולטיפ על פקד שכל תוכנו title', () => {
     expect(wrapper!.find('.word-tip').exists()).toBe(true);
   });
 
-  it('היציאה מחזירה את התכונות שהושאלו, ואינה משאירה data-tip-title משלנו', async () => {
-    const badge = mountOverBadge();
+  it('נסגר ביציאה, ואינו משאיר תכונות על הפקד', async () => {
+    const badge = control({ 'data-tip-title': 'וורד לאוצריא' });
+    hit = badge;
+    mountLayer();
 
     pointerMove(badge, 10, 10);
     vi.advanceTimersByTime(SHOW_DELAY_MS + 20);
@@ -105,35 +133,89 @@ describe('הטולטיפ על פקד שכל תוכנו title', () => {
     await wrapper!.vm.$nextTick();
 
     expect(wrapper!.find('.word-tip').exists()).toBe(false);
-    expect(badge.getAttribute('title')).toBe('וורד לאוצריא');
-    expect(badge.hasAttribute('data-tip-title')).toBe(false);
-    expect(badge.hasAttribute('aria-label')).toBe(false);
+    // השכבה קוראת בלבד: אין השאלה, אין החזרה, ואין שארית.
+    expect(badge.attributes.length).toBe(1);
+    expect(badge.getAttribute('data-tip-title')).toBe('וורד לאוצריא');
+  });
+
+  it('לחיצה סוגרת, והכרטיס אינו נפתח שוב כל עוד העכבר על אותו פקד', async () => {
+    const button = control({ 'data-tip-title': 'כיוון פסקה משמאל לימין' });
+    hit = button;
+    mountLayer();
+
+    pointerMove(button, 10, 10);
+    vi.advanceTimersByTime(SHOW_DELAY_MS + 20);
+    await wrapper!.vm.$nextTick();
+    expect(wrapper!.find('.word-tip').exists()).toBe(true);
+
+    pointerDown(button, 10, 10);
+    await wrapper!.vm.$nextTick();
+    expect(wrapper!.find('.word-tip').exists()).toBe(false);
+
+    pointerMove(button, 11, 10);
+    vi.advanceTimersByTime(SHOW_DELAY_MS + 20);
+    await wrapper!.vm.$nextTick();
+    expect(wrapper!.find('.word-tip').exists()).toBe(false);
+  });
+
+  it('עובר מפקד לפקד בלי להיסגר ביניהם', async () => {
+    const rtl = control({ 'data-tip-title': 'כיוון פסקה מימין לשמאל' });
+    const ltr = control({ 'data-tip-title': 'כיוון פסקה משמאל לימין' });
+    hit = rtl;
+    mountLayer();
+
+    pointerMove(rtl, 10, 10);
+    vi.advanceTimersByTime(SHOW_DELAY_MS + 20);
+    await wrapper!.vm.$nextTick();
+    expect(wrapper!.find('.word-tip__title').text()).toBe('כיוון פסקה מימין לשמאל');
+
+    // SWITCH_DELAY_MS הוא 70 — הרבה פחות מהפתיחה הראשונה.
+    hit = ltr;
+    pointerMove(ltr, 40, 10);
+    vi.advanceTimersByTime(100);
+    await wrapper!.vm.$nextTick();
+
+    expect(wrapper!.find('.word-tip__title').text()).toBe('כיוון פסקה משמאל לימין');
+  });
+
+  it('פקד בלי תכונות טולטיפ אינו פותח דבר', async () => {
+    const plain = document.createElement('button');
+    plain.setAttribute('title', 'טולטיפ מולד, אם מישהו יחזיר אותו');
+    document.body.appendChild(plain);
+    hit = plain;
+    mountLayer();
+
+    pointerMove(plain, 10, 10);
+    vi.advanceTimersByTime(SHOW_DELAY_MS + 20);
+    await wrapper!.vm.$nextTick();
+
+    // `title` אינו עוגן. זו ההצהרה שהשכבה אינה מנסה עוד להתחרות בדפדפן — היא
+    // מסתמכת על כך שהתכונה אינה קיימת (tests/unit/native-title.test.ts).
+    expect(wrapper!.find('.word-tip').exists()).toBe(false);
   });
 });
 
-describe('הטולטיפ על פקד שכבר מחווט', () => {
-  it('ה-data-tip-title שלו נשאר שלו — ההשאלה אינה דורסת ואינה מוחקת', async () => {
-    const button = document.createElement('button');
-    button.setAttribute('title', 'מודגש (Ctrl+B)');
-    button.setAttribute('data-tip-title', 'מודגש');
-    button.setAttribute('data-tip-shortcut', 'Ctrl+B');
-    document.body.appendChild(button);
+describe('ההסבר מקושר לפקד לקוראי מסך', () => {
+  it('aria-describedby נקשר בפתיחה ויורד בסגירה', async () => {
+    const button = control({
+      'data-tip-title': 'הגדל גופן',
+      'data-tip-desc': 'מגדיל את הטקסט המסומן בדרגה אחת בכל לחיצה',
+    });
     hit = button;
-    wrapper = mount(TooltipLayer, { attachTo: document.body });
+    mountLayer();
 
     pointerMove(button, 10, 10);
     vi.advanceTimersByTime(SHOW_DELAY_MS + 20);
     await wrapper!.vm.$nextTick();
 
-    expect(wrapper!.find('.word-tip__title').text()).toBe('מודגש');
-    expect(button.getAttribute('data-tip-title')).toBe('מודגש');
+    expect(button.getAttribute('aria-describedby')).toBe('word-tip-desc');
+    expect(wrapper!.find('#word-tip-desc').exists()).toBe(true);
 
     hit = null;
     pointerMove(document.body, 900, 900);
     vi.advanceTimersByTime(HIDE_DELAY_MS);
     await wrapper!.vm.$nextTick();
 
-    expect(button.getAttribute('data-tip-title')).toBe('מודגש');
-    expect(button.getAttribute('title')).toBe('מודגש (Ctrl+B)');
+    expect(button.hasAttribute('aria-describedby')).toBe(false);
   });
 });

@@ -10,7 +10,7 @@
       <div
         v-if="pageText"
         class="status-item"
-        title="עמודי המסמך"
+        data-tip-title="עמודי המסמך"
       >
         <span>{{ pageText }}</span>
       </div>
@@ -21,7 +21,7 @@
       <div
         v-if="wordText"
         class="status-item"
-        title="מספר מילים במסמך"
+        data-tip-title="מספר מילים במסמך"
       >
         <span>{{ wordText }}</span>
       </div>
@@ -36,6 +36,50 @@
       >
         <span>{{ statusText }}</span>
       </div>
+
+      <!-- מחוון הטעינה. מוצג רק בזמן שמסמך נפתח — ראו sessions/document-load.ts,
+           שם גם ההסבר למה „דלג” נעלם ברגע שהפתיחה הצליחה. -->
+      <div
+        v-if="load.active"
+        class="status-divider"
+      />
+      <div
+        v-if="load.active"
+        class="status-load"
+      >
+        <span class="status-load__text">
+          <span class="status-load__name">{{ load.name }}</span>
+          <span
+            v-if="load.stage"
+            class="status-load__stage"
+          >— {{ load.stage }}</span>
+        </span>
+        <div
+          class="status-load__bar"
+          :class="{ 'status-load__bar--full': load.percent >= 100 }"
+          role="progressbar"
+          aria-label="התקדמות פתיחת המסמך"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          :aria-valuenow="load.percent"
+        >
+          <div
+            class="status-load__fill"
+            :style="{ inlineSize: `${load.percent}%` }"
+          />
+        </div>
+        <button
+          v-if="load.cancellable"
+          type="button"
+          class="status-load__skip"
+          data-tip-title="דלג"
+          data-tip-desc="הפסקת הפתיחה. המסמך שפתוח עכשיו יישאר פתוח"
+          @pointerdown.prevent
+          @click="$emit('skip-load')"
+        >
+          דלג
+        </button>
+      </div>
     </div>
 
     <!-- צד שמאל (RTL): מצב תצוגה ובקרת זום -->
@@ -46,7 +90,8 @@
           class="sb-icon-btn"
           :class="{ active: isFocusMode }"
           :aria-pressed="isFocusMode"
-          title="מצב מיקוד"
+          data-tip-title="מצב מיקוד"
+          aria-label="מצב מיקוד"
           @pointerdown.prevent
           @click="$emit('toggle-focus')"
         >
@@ -64,7 +109,8 @@
         <button
           type="button"
           class="zoom-step-btn"
-          title="הקטן תצוגה"
+          data-tip-title="הקטן תצוגה"
+          aria-label="הקטן תצוגה"
           :disabled="zoomLevel <= zoomMin"
           @pointerdown.prevent
           @click="stepZoom(-ZOOM_STEP)"
@@ -78,14 +124,15 @@
           :step="ZOOM_STEP"
           :value="zoomLevel"
           class="zoom-slider"
-          title="שינוי גודל תצוגה"
+          data-tip-title="שינוי גודל תצוגה"
           aria-label="גודל תצוגה באחוזים"
           @input="onZoomSliderChange"
         >
         <button
           type="button"
           class="zoom-step-btn"
-          title="הגדל תצוגה"
+          data-tip-title="הגדל תצוגה"
+          aria-label="הגדל תצוגה"
           :disabled="zoomLevel >= zoomMax"
           @pointerdown.prevent
           @click="stepZoom(ZOOM_STEP)"
@@ -95,7 +142,8 @@
         <button
           type="button"
           class="zoom-pct-btn"
-          title="אפס ל-100%"
+          data-tip-title="אפס ל-100%"
+          aria-label="אפס ל-100%"
           @pointerdown.prevent
           @click="resetZoom"
         >
@@ -111,6 +159,7 @@ import { computed } from 'vue';
 import SvgIcon from '../icons/SvgIcon.vue';
 import { pageLabel, wordCountLabel } from '../../composables/shell-format';
 import { clampZoom, FALLBACK_ZOOM } from '../../engine/zoom';
+import { idleLoadSnapshot, type LoadSnapshot } from '../../sessions/document-load';
 
 /** צעד הזום של לחצני ± ושל הסרגל, באחוזים. */
 const ZOOM_STEP = 10;
@@ -129,6 +178,12 @@ const props = withDefaults(
     zoomLevel?: number;
     zoomMin?: number;
     zoomMax?: number;
+    /**
+     * מצב פתיחת המסמך. מגיע כאובייקט אחד ולא כחמישה props, מפני שהוא נמדד
+     * כיחידה אחת: אחוז בלי `active` הוא פס שנשאר על המסך אחרי שהפתיחה
+     * נגמרה, ו-`cancellable` בלי האחוז הוא כפתור „דלג” בלי מה לדלג עליו.
+     */
+    load?: LoadSnapshot;
   }>(),
   {
     currentPage: null,
@@ -140,12 +195,14 @@ const props = withDefaults(
     zoomLevel: FALLBACK_ZOOM.value,
     zoomMin: FALLBACK_ZOOM.min,
     zoomMax: FALLBACK_ZOOM.max,
+    load: () => idleLoadSnapshot(),
   }
 );
 
 const emit = defineEmits<{
   (e: 'update:zoomLevel', zoom: number): void;
   (e: 'toggle-focus'): void;
+  (e: 'skip-load'): void;
 }>();
 
 const pageText = computed(() => pageLabel(props.currentPage, props.totalPages));
@@ -190,6 +247,12 @@ function resetZoom(): void {
   gap: 4px;
 }
 
+/* בלעדיו שם המסמך הנטען דוחף את בקרת הזום מהשורה במקום להיחתך בשלוש נקודות:
+   פריט flex אינו מצטמצם מתחת לתוכן שלו בלי זה. */
+.statusbar-start {
+  min-width: 0;
+}
+
 .status-item {
   padding: 1px 6px;
   border-radius: var(--radius-xs);
@@ -214,6 +277,119 @@ function resetZoom(): void {
 
 .status-message.error {
   color: var(--color-error);
+}
+
+/* -------------------------------------------------------------------- */
+/* מחוון הטעינה                                                          */
+/* -------------------------------------------------------------------- */
+
+.status-load {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-inline: 6px;
+  min-width: 0;
+}
+
+.status-load__text {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--color-on-surface);
+}
+
+/* שם המסמך הוא מה שמתקצר בשלוש נקודות, והשלב הוא מה שנשאר שלם: „ספר בראשית
+   מבואר.docx — קורא…” אומר פחות מ„ספר בראש… — קורא את הקובץ”. שם המסמך נמצא
+   כאן כי פס הכותרת מציג בזמן פתיחה עדיין את המסמך הקודם. */
+.status-load__name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-inline-size: 22ch;
+}
+
+.status-load__stage {
+  white-space: nowrap;
+  flex-shrink: 0;
+  color: var(--color-on-surface-variant);
+}
+
+.status-load__bar {
+  position: relative;
+  inline-size: 96px;
+  block-size: 4px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-outline-variant);
+  overflow: hidden;
+}
+
+.status-load__fill {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  border-radius: inherit;
+  background: var(--word-blue);
+  transition: inline-size 180ms ease-out;
+}
+
+/* נצנוץ שרץ על הפס בלי קשר להתקדמות — אותה הכרעה כמו במסך הטעינה
+   שב-index.html: השלב שבו המנוע בונה את המסמך משאיר את הפס כמעט במקום,
+   ובלי תנועה עצמאית המשתמש קורא את זה כקריסה ולא כאיטיות. */
+.status-load__bar::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inline-size: 38%;
+  border-radius: inherit;
+  background: linear-gradient(to left, transparent, var(--word-blue), transparent);
+  /* שקיפות ב-opacity ולא ב-color-mix: ל-WebView2 שאוצריא מריצה אין תמיכה
+     מובטחת ב-color-mix, וכלל שאינו נתמך היה משאיר נצנוץ שקוף לגמרי. */
+  opacity: 0.45;
+  animation: status-load-sweep 1.4s ease-in-out infinite;
+}
+
+/* הפתיחה נגמרה: הפס מלא ועומד. נצנוץ על פס מלא נראה כמו עוד המתנה. */
+.status-load__bar--full::after {
+  animation: none;
+  opacity: 0;
+}
+
+@keyframes status-load-sweep {
+  from {
+    transform: translateX(120%);
+  }
+  to {
+    transform: translateX(-320%);
+  }
+}
+
+.status-load__skip {
+  background: none;
+  border: 1px solid var(--color-outline-variant);
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  font: inherit;
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.status-load__skip:hover {
+  background: var(--word-btn-hover);
+  border-color: var(--word-btn-active-border);
+  color: var(--word-blue);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-load__fill {
+    transition: none;
+  }
+
+  .status-load__bar::after {
+    animation: none;
+  }
 }
 
 .view-mode-buttons {

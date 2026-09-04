@@ -28,6 +28,7 @@ import LayoutTab from '../../src/ui/ribbon/tabs/LayoutTab.vue';
 import ReferencesTab from '../../src/ui/ribbon/tabs/ReferencesTab.vue';
 import ReviewTab from '../../src/ui/ribbon/tabs/ReviewTab.vue';
 import ViewTab from '../../src/ui/ribbon/tabs/ViewTab.vue';
+import ShulchanTab from '../../src/ui/ribbon/tabs/ShulchanTab.vue';
 import OtzariaTab from '../../src/ui/ribbon/tabs/OtzariaTab.vue';
 import Ribbon from '../../src/ui/ribbon/Ribbon.vue';
 import {
@@ -37,6 +38,7 @@ import {
   installSystemClipboard,
   mountUi,
   settle,
+  tipMessage,
 } from './harness';
 
 autoUnmount();
@@ -66,12 +68,15 @@ const TABS: ReadonlyArray<{
   { name: 'הפניות', component: ReferencesTab },
   { name: 'סקירה', component: ReviewTab },
   { name: 'תצוגה', component: ViewTab },
+  { name: 'שולחן העורך', component: ShulchanTab },
 ];
 
 /** מה שמזהה כפתור בהודעת כשל — כדי שאפשר יהיה למצוא אותו בקובץ. */
 function nameOf(button: DOMWrapper<Element>): string {
   return (
-    button.attributes('title') ||
+    // ההסבר ולא הכותרת, כשיש: בפקד מנוטרל הוא נושא את *הסיבה*, וזה מה
+    // שהבדיקות כאן מזהות לפיו („סגנונות תורניים יתווספו בשלב הבא”).
+    tipMessage(button) ||
     button.attributes('aria-label') ||
     button.text().trim() ||
     button.html().slice(0, 70)
@@ -191,10 +196,9 @@ describe('הפקדים שמנוטרלים בכוונה', () => {
     // המנוע. הם עברו ל-Document API (`format.vertAlign`) והם חיים מעכשיו —
     // ולכן הרשימה של „בית” ריקה.
     בית: [],
-    סקירה: [
-      'בדיקת איות בעברית — תתווסף עם המילון התורני, בשלב נפרד',
-      'הוספת תגובה — תתווסף בשלב הבא, יחד עם זהות המחבר ופאנל התגובות',
-    ],
+    // „בדיקת איות” הייתה כאן, מנוטרלת עם tooltip שהודה שאין מילון. המילון
+    // נכנס (issue #25) והיא מתג חי מעכשיו — ולכן נשארה רשומה אחת.
+    סקירה: ['הוספת תגובה — תתווסף בשלב הבא, יחד עם זהות המחבר ופאנל התגובות'],
     קובץ: [],
     // „קשר לקודם” אינו פקד מת: ה-API שלו קיים והוא נדלק ברגע שיש במסמך מקטע
     // שני. הוא מנוטרל כאן מפני שהמסמך שהכפיל מציג הוא בעל מקטע יחיד, ולמקטע
@@ -204,6 +208,7 @@ describe('הפקדים שמנוטרלים בכוונה', () => {
     פריסה: [],
     הפניות: [],
     תצוגה: [],
+    'שולחן העורך': [],
   };
 
   for (const tab of TABS) {
@@ -228,7 +233,6 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     'פתח קובץ',
     'שמור',
     'שמור בשם...',
-    'ייצוא ל-Word',
     'ייצוא ל-PDF',
     'הדפסה',
     'יציאה',
@@ -248,7 +252,7 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     return byLabel;
   }
 
-  it('עשרה פקדים, וכל התוויות נמצאו — אחרת הבדיקות למטה מודדות אוויר', async () => {
+  it('תשעה פקדים, וכל התוויות נמצאו — אחרת הבדיקות למטה מודדות אוויר', async () => {
     const byLabel = await states({ hasDocument: true });
 
     expect(Object.keys(byLabel)).toHaveLength(LABELS.length);
@@ -260,7 +264,6 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
 
     expect(byLabel['שמור']).toBe(true);
     expect(byLabel['שמור בשם...']).toBe(true);
-    expect(byLabel['ייצוא ל-Word']).toBe(true);
     expect(byLabel['הדפסה']).toBe(true);
     // „מסמך חדש” ו„פתח קובץ” הם בדיוק מה שעושים כשאין מסמך.
     expect(byLabel['מסמך חדש']).toBe(false);
@@ -273,14 +276,17 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
   it('שמירה שרצה: אין שמירה נוספת ואין מעבר מסמך', async () => {
     // `decideDocumentSwitch` מחזיר cancel עם reason 'saving', ומפעיל הפעולות
     // של הקיצורים חוסם את Ctrl+S. הפקד מראה את זה מראש במקום לבלוע לחיצה.
-    const byLabel = await states({ hasDocument: true, isSaving: true });
+    // `hasPdfExport` דלוק כאן ולא בשאר הבדיקות: בלעדיו „ייצוא ל-PDF” מנוטרל
+    // מטעם אחר לגמרי (אין `ui.exportPdf` ב-Host), והטענה שהשמירה אינה חוסמת
+    // אותו לא הייתה נמדדת בכלל.
+    const byLabel = await states({ hasDocument: true, isSaving: true, hasPdfExport: true });
 
     expect(byLabel['שמור']).toBe(true);
     expect(byLabel['שמור בשם...']).toBe(true);
     expect(byLabel['מסמך חדש']).toBe(true);
     expect(byLabel['פתח קובץ']).toBe(true);
     // ייצוא והדפסה קוראים את המסמך ואינם מתנגשים בשמירה.
-    expect(byLabel['ייצוא ל-Word']).toBe(false);
+    expect(byLabel['ייצוא ל-PDF']).toBe(false);
     expect(byLabel['הדפסה']).toBe(false);
     // „יציאה” כן: הוא שואל „לשמור לפני יציאה?”, ובזמן סבב שמירה השאלה הזאת
     // הייתה מציעה לשמור שוב את מה שנשמר כרגע.
@@ -300,7 +306,7 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     await settle();
 
     const save = harness.wrapper.findAll('button').find((b) => b.text().trim() === 'שמור');
-    expect(save?.attributes('title')).toContain('אין מסמך פתוח');
+    expect(tipMessage(save!)).toContain('אין מסמך פתוח');
   });
 
   it('„יציאה” פולט exit-app, וההודעה עוברת דרך הרצועה', async () => {
@@ -326,17 +332,49 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     expect(ribbon.wrapper.emitted('exit-app'), 'הרצועה לא העבירה את exit-app').toHaveLength(1);
   });
 
-  it('ה-tooltip של „יציאה” מסביר שהמסמך נשאר פתוח', async () => {
+  it('ה-tooltip של „יציאה” אומר שהמסמך נסגר', async () => {
     // „יציאה” מלשונית בתוך אוצריא אינו מובן מאליו: `navigation.goTo` משהה את
-    // ה-WebView ואינו הורס אותו, ולכן המסמך ממתין כפי שהיה. tooltip שלא אומר
-    // את זה היה משאיר את המשתמש בהנחה שהוא מאבד את העבודה.
+    // ה-WebView ואינו הורס אותו, ולכן היציאה סוגרת את המסמכים בעצמה (`onExit`
+    // ב-App.vue). כל עוד ה-tooltip הבטיח „המסמך יישאר פתוח” הוא סתר את השאלה
+    // שהלחיצה שואלת („לצאת בלי לשמור?”), וזו הטענה שנמדדת כאן.
     const harness = mountUi(FileTab, { superdoc: withSelection(), props: { hasDocument: true } });
     await settle();
 
     const exitButton = harness.wrapper
       .findAll('button')
       .find((button) => button.text().trim() === 'יציאה');
-    expect(exitButton?.attributes('title')).toContain('המסמך יישאר פתוח');
+    expect(tipMessage(exitButton!)).toContain('סגירת המסמך');
+  });
+
+  it('„יציאה” מנוטרל בזמן פתיחה, ואומר למה', async () => {
+    // סגירה באמצע פתיחה משאירה את `openDocumentInto` כותב לתוך טאב מפורק —
+    // `onExit` חוסם אותה ב-`isOpenBusy`, וכפתור שנלחץ ולא קורה בו דבר הוא
+    // בדיוק מה שהלשונית הזאת נמנעת ממנו בשאר הפקדים.
+    const harness = mountUi(FileTab, {
+      superdoc: withSelection(),
+      props: { hasDocument: true, isOpening: true },
+    });
+    await settle();
+
+    const exitButton = harness.wrapper
+      .findAll('button')
+      .find((button) => button.text().trim() === 'יציאה');
+    expect(exitButton!.attributes('disabled')).not.toBeUndefined();
+    expect(tipMessage(exitButton!)).toContain('פתיחת מסמך רצה כרגע');
+  });
+
+  it('„יציאה” מנוטרל בזמן שסגירה קודמת רצה', async () => {
+    const harness = mountUi(FileTab, {
+      superdoc: withSelection(),
+      props: { hasDocument: true, isExiting: true },
+    });
+    await settle();
+
+    const exitButton = harness.wrapper
+      .findAll('button')
+      .find((button) => button.text().trim() === 'יציאה');
+    expect(exitButton!.attributes('disabled')).not.toBeUndefined();
+    expect(tipMessage(exitButton!)).toContain('סגירת המסמכים רצה כרגע');
   });
 
   it('הרצועה מעבירה את שלושת המצבים — אחרת ה-props כאן הם קוד מת', async () => {
@@ -399,7 +437,9 @@ describe('„אוצריא”', () => {
     // המאקרו רץ כולו בעורך ואינו קורא ל-SDK של אוצריא, ולכן ניטרול שלו מחוץ
     // לאוצריא היה לוקח מהמשתמש יכולת שעובדת. פקדי הציטוט/חיפוש/ספרייה כן
     // מנוטרלים — הם בדיוק מה שאין בלי ה-SDK.
-    expect(live).toEqual(['ניהול מאקרו', 'הקלט מאקרו', 'נגן אחרון']);
+    // „ייצוא לאוצריא” נשאר חי מחוץ לאוצריא: מסלול השמירה ממומש ב-dev-stub,
+    // וכך הוא נבדק בדפדפן — כמו „שמור בשם” בלשונית „קובץ”.
+    expect(live).toEqual(['ייצוא לאוצריא', 'ניהול מאקרו', 'הקלט מאקרו', 'נגן אחרון']);
   });
 });
 

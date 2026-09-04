@@ -14,7 +14,7 @@
 
     <!-- הצג -->
     <RibbonGroup title="הצג">
-      <div class="column-items">
+      <RibbonStack>
         <RibbonButton
           icon="ruler"
           label="סרגל"
@@ -34,7 +34,7 @@
           :disabled="!marksCmd.enabled.value"
           @click="marksCmd.run()"
         />
-      </div>
+      </RibbonStack>
     </RibbonGroup>
 
     <!-- זום -->
@@ -73,6 +73,7 @@
 import { inject, shallowRef } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
+import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import { useCommand } from '../../../composables/useCommand';
 import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
@@ -140,13 +141,5 @@ async function runFitPageWidth(): Promise<void> {
   align-items: stretch;
   gap: 0;
   height: 100%;
-}
-
-.column-items {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  justify-content: center;
-  flex-shrink: 0;
 }
 </style>

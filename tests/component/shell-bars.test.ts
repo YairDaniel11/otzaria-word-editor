@@ -17,7 +17,7 @@ import TitleBar from '../../src/ui/shell/TitleBar.vue';
 import StatusBar from '../../src/ui/shell/StatusBar.vue';
 import { docTitleWidthCh } from '../../src/composables/shell-format';
 import { FALLBACK_ZOOM } from '../../src/engine/zoom';
-import { autoUnmount, emittedCount, mountUi, settle } from './harness';
+import { autoUnmount, emittedCount, mountUi, settle, tipMessage } from './harness';
 
 autoUnmount();
 
@@ -47,7 +47,7 @@ describe('מתג השמירה האוטומטית', () => {
 
     const toggle = harness.wrapper.find('.autosave-toggle');
     expect(toggle.attributes('aria-checked')).toBe('false');
-    expect(toggle.attributes('title')).toContain('כבויה');
+    expect(tipMessage(toggle)).toContain('כבויה');
 
     await harness.wrapper.setProps({ autosaveEnabled: true });
     expect(harness.wrapper.find('.autosave-toggle').attributes('aria-checked')).toBe('true');
@@ -55,19 +55,27 @@ describe('מתג השמירה האוטומטית', () => {
 });
 
 describe('פקדי פס הכותרת', () => {
-  it('החיפוש הוא כפתור עם שם נגיש', async () => {
-    // מה שהיה: `input readonly` שנראה כמו מקום להקליד בו, וה-`@click` על ה-div
-    // העוטף — כלומר המקלדת לא הגיעה אליו בכלל.
+  it('החיפוש הוא תיבת Tell Me אינטראקטיבית עם שם נגיש ו-combobox', async () => {
     const harness = mountUi(TitleBar);
     await settle();
 
-    const search = harness.wrapper.find('.search-box');
-    expect(search.element.tagName).toBe('BUTTON');
-    expect(search.attributes('aria-label')).toBe('חיפוש והחלפה במסמך');
+    const searchInput = harness.wrapper.find('.tell-me-input');
+    expect(searchInput.exists()).toBe(true);
+    expect(searchInput.element.tagName).toBe('INPUT');
+    expect(searchInput.attributes('role')).toBe('combobox');
+    expect(searchInput.attributes('aria-label')).toBe('חיפוש אפשרויות, פקודות ועזרה');
     expect(harness.wrapper.find('input[readonly]').exists()).toBe(false);
 
-    await search.trigger('click');
-    expect(harness.wrapper.emitted('open-find')).toHaveLength(1);
+    // לחיצה על אפשרות "חפש במסמך" בתפריט Tell Me פולטת open-find
+    await searchInput.trigger('focus');
+    await searchInput.setValue('טקסט לבדיקה');
+    await settle();
+
+    const docSearch = harness.wrapper.find('#tell-me-item-doc-search');
+    expect(docSearch.exists()).toBe(true);
+    await docSearch.trigger('click');
+    expect(harness.wrapper.emitted('open-find')).toBeDefined();
+    expect(harness.wrapper.emitted('open-find')![0]).toEqual(['טקסט לבדיקה']);
   });
 
   it('לכל כפתור בסרגל הגישה המהירה יש מטפל', async () => {
@@ -167,6 +175,123 @@ describe('נתוני שורת המצב', () => {
   });
 });
 
+/**
+ * מחוון הטעינה.
+ *
+ * מה שנמדד כאן הוא מה שדורש רינדור: שהפס באמת מגיע לרוחב שדווח, ששם המסמך
+ * הנטען נמצא על המסך (ולא נשען על פס הכותרת, שבזמן פתיחה מציג עדיין את המסמך
+ * הקודם), ושהמחוון נעלם לגמרי כשאין פתיחה. ההכרעות עצמן — הזחילה, בליעת
+ * הנסיגה, והרגע שבו „דלג” מפסיק לתפוס — נמדדות ב-tests/unit/document-load.test.ts.
+ */
+describe('מחוון הטעינה', () => {
+  it('אין פתיחה — אין מחוון ואין כפתור „דלג”', async () => {
+    const harness = mountUi(StatusBar);
+    await settle();
+
+    expect(harness.wrapper.find('.status-load').exists()).toBe(false);
+    expect(harness.wrapper.find('[role="progressbar"]').exists()).toBe(false);
+  });
+
+  it('מציג את שם המסמך הנטען ואת השלב', async () => {
+    const harness = mountUi(StatusBar, {
+      props: {
+        load: {
+          active: true,
+          percent: 42,
+          name: 'בראשית.docx',
+          stage: 'בונה את המסמך…',
+          cancellable: true,
+        },
+      },
+    });
+    await settle();
+
+    const text = harness.wrapper.find('.status-load__text').text();
+    expect(text).toContain('בראשית.docx');
+    expect(text).toContain('בונה את המסמך…');
+  });
+
+  it('הפס מדווח את ההתקדמות — גם לקורא מסך וגם ברוחב', async () => {
+    const harness = mountUi(StatusBar, {
+      props: {
+        load: { active: true, percent: 42, name: 'בראשית.docx', stage: '', cancellable: true },
+      },
+    });
+    await settle();
+
+    const bar = harness.wrapper.find('[role="progressbar"]');
+    expect(bar.attributes('aria-valuenow')).toBe('42');
+    expect(bar.attributes('aria-valuemin')).toBe('0');
+    expect(bar.attributes('aria-valuemax')).toBe('100');
+    expect(bar.attributes('aria-label')).toBeTruthy();
+
+    // הרוחב הוא מה שהמשתמש רואה; `aria-valuenow` לבדו הוא פס שלא זז.
+    const fill = harness.wrapper.find('.status-load__fill');
+    expect(fill.attributes('style')).toContain('42%');
+  });
+
+  it('„דלג” הוא כפתור שמקבל מיקוד ופולט את הבקשה', async () => {
+    const harness = mountUi(StatusBar, {
+      props: {
+        load: { active: true, percent: 60, name: 'בראשית.docx', stage: '', cancellable: true },
+      },
+    });
+    await settle();
+
+    const skip = harness.wrapper.find('.status-load__skip');
+    expect(skip.element.tagName).toBe('BUTTON');
+    (skip.element as HTMLElement).focus();
+    expect(document.activeElement).toBe(skip.element);
+
+    await skip.trigger('click');
+    expect(harness.wrapper.emitted('skip-load')).toHaveLength(1);
+  });
+
+  it('פתיחה שאינה ניתנת לביטול — פס בלי „דלג”', async () => {
+    // הרגע שאחרי `finish()`: הפס על 100% ועוד על המסך, ואין יותר מה לבטל.
+    const harness = mountUi(StatusBar, {
+      props: {
+        load: { active: true, percent: 100, name: 'בראשית.docx', stage: 'מוכן', cancellable: false },
+      },
+    });
+    await settle();
+
+    expect(harness.wrapper.find('[role="progressbar"]').exists()).toBe(true);
+    expect(harness.wrapper.find('.status-load__skip').exists()).toBe(false);
+  });
+
+  it('המחוון נעלם כשהפתיחה נגמרה', async () => {
+    const harness = mountUi(StatusBar, {
+      props: {
+        load: { active: true, percent: 88, name: 'בראשית.docx', stage: '', cancellable: true },
+      },
+    });
+    await settle();
+    expect(harness.wrapper.find('.status-load').exists()).toBe(true);
+
+    await harness.wrapper.setProps({
+      load: { active: false, percent: 0, name: '', stage: '', cancellable: false },
+    });
+
+    expect(harness.wrapper.find('.status-load').exists()).toBe(false);
+  });
+
+  it('אינו דוחק את נתוני המסמך שלצדו', async () => {
+    const harness = mountUi(StatusBar, {
+      props: {
+        currentPage: 4,
+        totalPages: 12,
+        load: { active: true, percent: 30, name: 'בראשית.docx', stage: '', cancellable: true },
+      },
+    });
+    await settle();
+
+    const text = harness.wrapper.find('.statusbar-start').text();
+    expect(text).toContain('עמוד 4 מתוך 12');
+    expect(text).toContain('בראשית.docx');
+  });
+});
+
 describe('בקרת הזום', () => {
   it('הגבולות מגיעים מהמנוע ולא ממספר קשיח', async () => {
     // 50/200 היו מקודדים גם בסרגל וגם ב-stepZoom. כאן נמסרים גבולות אחרים
@@ -220,7 +345,7 @@ describe('בקרת הזום', () => {
     expect(buttons.length).toBeGreaterThan(0);
 
     for (const button of buttons) {
-      expect(button.attributes('disabled'), button.attributes('title')).toBeUndefined();
+      expect(button.attributes('disabled'), tipMessage(button)).toBeUndefined();
       await button.trigger('click');
     }
 

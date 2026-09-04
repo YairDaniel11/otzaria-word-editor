@@ -121,7 +121,7 @@ const expr = `(async () => {
   }
 
   async function clickZoomButton(title) {
-    const btn = q('button[title="' + title + '"]');
+    const btn = q('button[data-tip-title="' + title + '"],button[data-tip-desc="' + title + '"]');
     if (!btn) return { found: false };
     const before = { disabled: btn.disabled };
     btn.click();
@@ -134,8 +134,8 @@ const expr = `(async () => {
 
   if (!(await clickTab('תצוגה'))) return { fatal: 'לשונית תצוגה לא נמצאה' };
 
-  const fitBtn = q('button[title="התאם את תצוגת העמוד לרוחב החלון"]');
-  const hundredBtn = q('button[title="הצג את המסמך בגודלו האמיתי (100%)"]');
+  const fitBtn = q('button[data-tip-title="התאם את תצוגת העמוד לרוחב החלון"],button[data-tip-desc="התאם את תצוגת העמוד לרוחב החלון"]');
+  const hundredBtn = q('button[data-tip-title="הצג את המסמך בגודלו האמיתי (100%)"],button[data-tip-desc="הצג את המסמך בגודלו האמיתי (100%)"]');
   out.buttonStates = { fitDisabled: fitBtn?.disabled ?? null, hundredDisabled: hundredBtn?.disabled ?? null };
 
   const fit = await clickZoomButton('התאם את תצוגת העמוד לרוחב החלון');

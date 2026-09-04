@@ -10,7 +10,8 @@
       <button
         type="button"
         class="color-main-btn"
-        :title="menuString(title)"
+        :data-tip-title="menuString(title)"
+        :aria-label="menuString(title)"
         :disabled="disabled"
         @pointerdown.prevent
         @click="applyCurrentColor"
@@ -28,7 +29,8 @@
         type="button"
         class="color-arrow-btn"
         :disabled="disabled"
-        :title="menuString('בחירת צבע')"
+        :data-tip-title="menuString('בחירת צבע')"
+        :aria-label="menuString('בחירת צבע')"
         @pointerdown.prevent
         @click="toggleDropdown"
       >
@@ -49,8 +51,13 @@
       ref="popoverRef"
       class="color-palette-popover"
       :style="popoverStyle"
-      @pointerdown.stop
+      @pointerdown.prevent.stop
     >
+      <!--
+        `.prevent` על המעטפת ולא רק על הדוגמיות: לחיצה על כותרת פלטה או
+        ברווח שביניהן גזלה את הפוקוס מהמסמך. שדה הצבע המותאם נפתח ב-`click()`
+        תכנותי, שביטול `pointerdown` אינו נוגע בו.
+      -->
       <div
         v-if="allowClear"
         class="palette-section"
@@ -78,13 +85,15 @@
             class="theme-column"
           >
             <button
-              v-for="(hex, rowIndex) in col"
+              v-for="(hex, rowIndex) in col.shades"
               :key="rowIndex"
               type="button"
               class="color-swatch"
               :class="{ selected: modelValue?.toLowerCase() === hex.toLowerCase() }"
               :style="{ backgroundColor: hex }"
-              :title="hex"
+              :data-tip-title="shadeName(col.family, rowIndex)"
+              :data-tip-desc="hex"
+              :aria-label="shadeName(col.family, rowIndex)"
               @pointerdown.prevent
               @click="selectColor(hex)"
             />
@@ -99,15 +108,17 @@
         </div>
         <div class="standard-colors-row">
           <button
-            v-for="hex in STANDARD_COLORS"
-            :key="hex"
+            v-for="color in STANDARD_COLORS"
+            :key="color.hex"
             type="button"
             class="color-swatch"
-            :class="{ selected: modelValue?.toLowerCase() === hex.toLowerCase() }"
-            :style="{ backgroundColor: hex }"
-            :title="hex"
+            :class="{ selected: modelValue?.toLowerCase() === color.hex.toLowerCase() }"
+            :style="{ backgroundColor: color.hex }"
+            :data-tip-title="menuString(color.name)"
+            :data-tip-desc="color.hex"
+            :aria-label="menuString(color.name)"
             @pointerdown.prevent
-            @click="selectColor(hex)"
+            @click="selectColor(color.hex)"
           />
         </div>
       </div>
@@ -124,7 +135,7 @@
             type="color"
             :value="modelValue || defaultColor"
             class="custom-color-input"
-            @input="selectColor(($event.target as HTMLInputElement).value)"
+            @change="selectColor(($event.target as HTMLInputElement).value)"
           >
         </label>
       </div>
@@ -133,28 +144,62 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { inject, ref, shallowRef, onMounted, onUnmounted } from 'vue';
+import type { SuperDoc } from 'superdoc';
+import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
+import { focusDocument } from '../../../engine/focus';
 import SvgIcon from '../../icons/SvgIcon.vue';
 import { menuString } from '../i18n';
 import { usePopoverPosition } from '../../../composables/popover-position';
 
+/**
+ * שם הצבע, ולא רק הקוד שלו.
+ *
+ * `#1f497d` הוא מה שקורא מסך היה מכריז עד עכשיו — כלומר שמונה תווים באיות.
+ * שם המשפחה כבר היה כאן כהערה, ומכאן הוא נתון: הוא נכנס לכותרת הטולטיפ
+ * ולשם הנגיש, והקוד יורד לשורת ההסבר (הוא עדיין המידע שמעצב מחפש).
+ *
+ * „גוון 3” ולא „בהיר יותר 60%”: הסדר בעמודה אכן קבוע, אבל האחוזים הם מה
+ * ש-Word מחשב מהערכה, ואין כאן חישוב כזה — מספר שאינו נמדד היה דיוק מדומה.
+ */
 const THEME_COLUMNS = [
-  ['#ffffff', '#f2f2f2', '#d9d9d9', '#bfbfbf', '#a6a6a6', '#7f7f7f'], // לבן/אפור בהיר
-  ['#000000', '#7f7f7f', '#595959', '#3f3f3f', '#262626', '#0c0c0c'], // שחור/אפור כהה
-  ['#eeece1', '#ddd9c3', '#c4bd97', '#948a54', '#494429', '#1d1b10'], // חום בהיר
-  ['#1f497d', '#c6d9f1', '#8db3e2', '#548dd4', '#366092', '#17365d'], // כחול כהה
-  ['#4f81bd', '#dce6f1', '#b8cce4', '#95b3d7', '#376092', '#254061'], // כחול
-  ['#c0504d', '#f2dcdb', '#e6b8b7', '#da9694', '#963634', '#632423'], // אדום
-  ['#9bbb59', '#ebf1dd', '#d7e3bc', '#c3d69b', '#76933c', '#4f6228'], // ירוק זית
-  ['#8064a2', '#e5e0ec', '#ccc1da', '#b2a2c7', '#604a7b', '#403151'], // סגול
-  ['#4bacc6', '#dbeef3', '#b7dde8', '#92cddc', '#31859b', '#215967'], // טורקיז
-  ['#f79646', '#fdeada', '#fbd5b5', '#fac08f', '#e36c09', '#974806'], // כתום
+  { family: 'לבן ואפור בהיר', shades: ['#ffffff', '#f2f2f2', '#d9d9d9', '#bfbfbf', '#a6a6a6', '#7f7f7f'] },
+  { family: 'שחור ואפור כהה', shades: ['#000000', '#7f7f7f', '#595959', '#3f3f3f', '#262626', '#0c0c0c'] },
+  { family: 'חום בהיר', shades: ['#eeece1', '#ddd9c3', '#c4bd97', '#948a54', '#494429', '#1d1b10'] },
+  { family: 'כחול כהה', shades: ['#1f497d', '#c6d9f1', '#8db3e2', '#548dd4', '#366092', '#17365d'] },
+  { family: 'כחול', shades: ['#4f81bd', '#dce6f1', '#b8cce4', '#95b3d7', '#376092', '#254061'] },
+  { family: 'אדום', shades: ['#c0504d', '#f2dcdb', '#e6b8b7', '#da9694', '#963634', '#632423'] },
+  { family: 'ירוק זית', shades: ['#9bbb59', '#ebf1dd', '#d7e3bc', '#c3d69b', '#76933c', '#4f6228'] },
+  { family: 'סגול', shades: ['#8064a2', '#e5e0ec', '#ccc1da', '#b2a2c7', '#604a7b', '#403151'] },
+  { family: 'טורקיז', shades: ['#4bacc6', '#dbeef3', '#b7dde8', '#92cddc', '#31859b', '#215967'] },
+  { family: 'כתום', shades: ['#f79646', '#fdeada', '#fbd5b5', '#fac08f', '#e36c09', '#974806'] },
 ];
 
+/** שמות הצבעים הסטנדרטיים, בסדר שבו הם מוצגים — כמו ב-Word. */
 const STANDARD_COLORS = [
-  '#c00000', '#ff0000', '#ffc000', '#ffff00', '#92d050',
-  '#00b050', '#00b0f0', '#0070c0', '#002060', '#7030a0'
+  { hex: '#c00000', name: 'אדום כהה' },
+  { hex: '#ff0000', name: 'אדום' },
+  { hex: '#ffc000', name: 'כתום' },
+  { hex: '#ffff00', name: 'צהוב' },
+  { hex: '#92d050', name: 'ירוק בהיר' },
+  { hex: '#00b050', name: 'ירוק' },
+  { hex: '#00b0f0', name: 'תכלת' },
+  { hex: '#0070c0', name: 'כחול' },
+  { hex: '#002060', name: 'כחול כהה' },
+  { hex: '#7030a0', name: 'סגול' },
 ];
+
+/**
+ * „כחול, גוון 3”. הבסיס הוא הראשון בעמודה, ולכן הוא בשם המשפחה בלבד.
+ *
+ * התרגום כאן ולא בקורא: השם מורכב משם המשפחה ומהמילה „גוון”, ומחרוזת מורכבת
+ * לא הייתה מתאימה לשום מפתח במילון. `menuString` נקראת מתוך ה-render של
+ * התבנית, ולכן הקריאה כאן עדיין מגיבה לשינוי שפה.
+ */
+function shadeName(family: string, index: number): string {
+  const name = menuString(family);
+  return index === 0 ? name : `${name}, ${menuString('גוון')} ${index + 1}`;
+}
 
 const props = withDefaults(
   defineProps<{
@@ -188,6 +233,7 @@ const containerRef = ref<HTMLElement | null>(null);
 const popoverRef = ref<HTMLElement | null>(null);
 const customColorRef = ref<HTMLInputElement | null>(null);
 const isOpen = ref(false);
+const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 
 const { popoverStyle } = usePopoverPosition(containerRef, popoverRef, isOpen);
 
@@ -196,12 +242,18 @@ function toggleDropdown(): void {
   isOpen.value = !isOpen.value;
 }
 
+/**
+ * גם הבחירה מהדו-שיח המקורי מגיעה לכאן, אבל ב-`change` ולא ב-`input`:
+ * `input` יורה על כל תזוזה בתוך הדו-שיח, וכל ירייה סגרה את הפופאובר, שלחה
+ * פקודת צבע למנוע והחזירה מיקוד למסמך — עוד לפני שהמשתמש סיים לבחור.
+ */
 function selectColor(hex: string | null): void {
   // `modelValue` נשאר מחרוזת — הוא מזין את פס הצבע שעל הכפתור, ו-CSS צריך שם
   // ערך ולא null. רק ה-`change`, כלומר מה שהופך ל-payload, נושא את ההבחנה.
   emit('update:modelValue', hex ?? '');
   emit('change', hex);
   isOpen.value = false;
+  focusDocument(superdoc.value);
 }
 
 /**
@@ -247,7 +299,10 @@ onUnmounted(() => {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   transition: background 0.08s, border-color 0.08s;
-  height: 24px;
+  /* אותה שורה כמו `.btn-icon-only` ו-`RibbonSelect`: הפקד הזה יושב איתם
+     באותה `.word-group-row` ב„גופן”, ו-24px קשיח היה משאיר אותו גבוה מהם
+     בשתי נקודות. ראו tokens.css. */
+  height: var(--ribbon-row-h);
 }
 
 .color-btn-wrapper:hover {

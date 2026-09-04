@@ -29,12 +29,14 @@ try {
   await app.click('מספור');
   await app.sleep(1400);
 
-  const menu = await app.click('רשימה');
+  // „רשימה" היה פקד שלישי לצד „תבליטים" ו„מספור", והוא אוחד לתוכם: הפעולות
+  // יושבות עכשיו מאחורי החץ של הכפתור המפוצל שיצר את הרשימה.
+  const menu = await app.click('פעולות מספור');
   await app.sleep(800);
   const labels = JSON.parse(await app.js(
     `JSON.stringify(Array.from(document.querySelectorAll('.ribbon-menu__item-label')).map(n=>n.textContent.trim()))`,
   ));
-  console.log('תפריט „רשימה":', JSON.stringify(labels));
+  console.log('תפריט „פעולות מספור":', JSON.stringify(labels));
 
   const gematria = labels.find((l) => l.includes('גימטריה'));
   const alefbet = labels.find((l) => l.includes('אלף־בית'));
@@ -51,9 +53,9 @@ try {
     ['אלף־בית', ['א.', 'י.', 'כ.', 'ס.', 'ע.']],
   ]) {
     // התפריט כבר פתוח מקריאת התוויות, ו-Escape אינו סוגר אותו — לכן פותחים
-    // רק כשהוא באמת סגור. לחיצה על „רשימה" כשהוא פתוח מקפלת אותו.
+    // רק כשהוא באמת סגור. לחיצה על החץ כשהוא פתוח מקפלת אותו.
     if (!(await app.menuOpen())) {
-      await app.click('רשימה');
+      await app.click('פעולות מספור');
       await app.sleep(700);
     }
     const wanted = labels.find((l) => l.includes(label));

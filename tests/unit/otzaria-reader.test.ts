@@ -20,7 +20,15 @@ import {
   normalizeSelectedText,
   openLibrary,
   openSearchTab,
+  registerSendToDocumentItem,
+  handleSendToDocument,
+  takePendingContextMenuClicks,
+  CONTEXT_MENU_LATCH_KEY,
+  SEND_TO_DOCUMENT_ITEM,
+  SEND_TO_DOCUMENT_ITEM_ID,
 } from '../../src/host/otzaria-reader';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /** כפיל שמצליח ומחזיר את מה שאוצריא מתועדת כמחזירה. */
 function hostReturns(data: unknown): ReturnType<typeof vi.fn> {
@@ -477,5 +485,272 @@ describe('insertCitation', () => {
       value: 'document-end',
     });
     expect(insert).toHaveBeenCalledWith({ value: 'ויאמר', type: 'text' });
+  });
+});
+
+/* ===========================================================================
+ *  „שלח למסמך” — פריט תפריט ההקשר
+ * ========================================================================= */
+
+/**
+ * מסמך שמקבל הכנסות, ואוסף אותן כדי שהבדיקה תראה מה נכתב.
+ *
+ * `capabilities` אינו קישוט: `canInsertText` שואלת גם אותו, ומסמך מדומה
+ * שחושף `insert` בלבד נחשב „אינו מוכן”. הכפיל הראשון כאן היה כזה, וההמתנה
+ * ב-`handleSendToDocument` הסתובבה עליו עד שהבדיקה נתקעה — בדיוק הצורה
+ * שהמנוע האמיתי מדווח בה, ולכן אותה צורה גם כאן.
+ */
+function documentHost(options: { ready?: boolean } = {}): {
+  host: { activeEditor: { doc: Record<string, unknown> } };
+  inserted: string[];
+} {
+  const inserted: string[] = [];
+  const doc: Record<string, unknown> = {
+    insert: async ({ value }: { value: string }): Promise<DocReceipt> => {
+      inserted.push(value);
+      return { success: true } as DocReceipt;
+    },
+    capabilities: { get: () => ({ operations: { insert: { available: true } } }) },
+    getSelection: async (): Promise<SelectionInfoLike> => ({}) as SelectionInfoLike,
+  };
+  if (options.ready === false) delete doc.insert;
+  return { host: { activeEditor: { doc } }, inserted };
+}
+
+describe('registerSendToDocumentItem', () => {
+  it('רושמת בדיוק את הפריט שמוצהר במניפסט — openPlugin ושני הקשרי הקריאה', async () => {
+    const call = hostReturns(true);
+
+    await expect(registerSendToDocumentItem()).resolves.toEqual({ ok: true, value: undefined });
+    expect(call).toHaveBeenCalledWith('reader.addContextMenuItem', {
+      id: SEND_TO_DOCUMENT_ITEM_ID,
+      title: 'שלח למסמך',
+      icon: 'document_text_24_regular',
+      contexts: ['reader-selection', 'reader-page-shape-selection'],
+      openPlugin: true,
+    });
+  });
+
+  it('הרשאה חסרה מגיעה כהודעה בעברית שאומרת מה חסר', async () => {
+    hostFails('error.permission_denied', 'Permission denied');
+
+    const outcome = await registerSendToDocumentItem();
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.message).toContain('reader.context_menu');
+  });
+});
+
+describe('handleSendToDocument', () => {
+  const noWait = { now: () => 0, sleep: async (): Promise<void> => {} };
+
+  it('מכניסה את הציטוט עם המקור, בדיוק כמו „ציטוט מהקורא”', async () => {
+    const { host, inserted } = documentHost();
+
+    const outcome = await handleSendToDocument(
+      {
+        itemId: SEND_TO_DOCUMENT_ITEM_ID,
+        selection: { text: 'וַיֹּאמֶר אֱלֹהִים', currentRef: 'בראשית פרק א' } as never,
+      },
+      { host, ...noWait },
+    );
+
+    expect(outcome).toEqual({ ok: true, value: 'document-end' });
+    expect(inserted).toEqual(['וַיֹּאמֶר אֱלֹהִים (בראשית פרק א)']);
+  });
+
+  it('מעדיפה את טקסט המקור על המרונדר — הציטוט משקף את הספר ולא את המסך', async () => {
+    const { host, inserted } = documentHost();
+
+    await handleSendToDocument(
+      {
+        itemId: SEND_TO_DOCUMENT_ITEM_ID,
+        selection: {
+          text: 'ויאמר',
+          renderedSelectedText: 'ויאמר',
+          sourceSelectedText: 'וַיֹּאמֶר',
+          currentRef: 'בראשית א',
+        } as never,
+      },
+      { host, ...noWait },
+    );
+
+    expect(inserted).toEqual(['וַיֹּאמֶר (בראשית א)']);
+  });
+
+  it('מארח ישן שמוסר שדות שטוחים בלבד נותן אותו מלל', async () => {
+    const { host, inserted } = documentHost();
+
+    await handleSendToDocument(
+      { itemId: SEND_TO_DOCUMENT_ITEM_ID, selectedText: 'ויאמר  אלהים', currentRef: 'בראשית א' },
+      { host, ...noWait },
+    );
+
+    expect(inserted).toEqual(['ויאמר אלהים (בראשית א)']);
+  });
+
+  it('מתעלמת מלחיצה על פריט של תוסף אחר', async () => {
+    const { host, inserted } = documentHost();
+
+    const outcome = await handleSendToDocument({ itemId: 'other-plugin-item' }, { host, ...noWait });
+
+    expect(outcome).toEqual({ ok: false, reason: 'other-item', message: '' });
+    expect(inserted).toEqual([]);
+  });
+
+  it('בלי טקסט מסומן אומרת זאת, ואינה כותבת כלום', async () => {
+    const { host, inserted } = documentHost();
+
+    const outcome = await handleSendToDocument(
+      { itemId: SEND_TO_DOCUMENT_ITEM_ID, selection: { text: '   ', currentRef: null } as never },
+      { host, ...noWait },
+    );
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.message).toContain('לא נמצא טקסט מסומן');
+    expect(inserted).toEqual([]);
+  });
+
+  it('ממתינה למסמך שנפרס אחרי שהאירוע הגיע — זה המקרה של openPlugin', async () => {
+    const ready = documentHost();
+    let current: unknown = documentHost({ ready: false }).host;
+    let clock = 0;
+
+    const outcome = await handleSendToDocument(
+      {
+        itemId: SEND_TO_DOCUMENT_ITEM_ID,
+        selection: { text: 'ויאמר', currentRef: 'בראשית א' } as never,
+      },
+      {
+        host: current as never,
+        resolveHost: () => current as never,
+        now: () => clock,
+        sleep: async () => {
+          clock += 150;
+          if (clock >= 600) current = ready.host;
+        },
+      },
+    );
+
+    expect(outcome.ok).toBe(true);
+    expect(ready.inserted).toEqual(['ויאמר (בראשית א)']);
+  });
+
+  it('מוותרת אחרי הזמן הקצוב ואומרת שאין מסמך', async () => {
+    const notReady = documentHost({ ready: false });
+    let clock = 0;
+
+    const outcome = await handleSendToDocument(
+      {
+        itemId: SEND_TO_DOCUMENT_ITEM_ID,
+        selection: { text: 'ויאמר', currentRef: 'בראשית א' } as never,
+      },
+      {
+        host: notReady.host,
+        now: () => clock,
+        sleep: async () => {
+          clock += 5_000;
+        },
+      },
+    );
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.message).toContain('אין מסמך פתוח');
+  });
+});
+
+/* ===========================================================================
+ *  ה-latch של הלחיצה
+ * ========================================================================= */
+
+/**
+ * זה הפער שהפיל את הפיצ'ר: אוצריא משגרת את אירוע הלחיצה מיד אחרי ה-boot,
+ * והמאזין ב-App.vue נרשם רק אחרי שהבאנדל נטען — שניות אחר כך. אירוע window
+ * בלי מאזין אובד, ואוצריא אינה משחזרת אותו. ה-latch ב-`index.html` הוא מה
+ * שגישר, והבדיקות כאן מקבעות את שני צדדיו.
+ */
+describe('ה-latch של „שלח למסמך”', () => {
+  // הנרמול אינו מתקן כשל: במאגר index.html הוא LF, ובלעדיו הבדיקה נשברת רק
+  // אצל מי ש-git שלו המיר ל-CRLF.
+  const html = readFileSync(join(process.cwd(), 'index.html'), 'utf8').replace(/\r\n/g, '\n');
+
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>)[CONTEXT_MENU_LATCH_KEY];
+  });
+
+  it('ה-latch ב-index.html נושא את השם שהקוד קורא לו, ומאזין לאירוע המטופס', () => {
+    expect(html).toContain(`window.${CONTEXT_MENU_LATCH_KEY} =`);
+    expect(html).toContain("window.addEventListener('contextMenu.itemClicked'");
+  });
+
+  it('הוא רץ ב-head, לפני הבאנדל — אחרת אין לו טעם', () => {
+    expect(html.indexOf(CONTEXT_MENU_LATCH_KEY)).toBeLessThan(html.indexOf('src/main.ts'));
+  });
+
+  /**
+   * הסקריפט האמיתי מ-index.html, מורץ ב-jsdom.
+   *
+   * בלי זה הבדיקות היו נשענות על latch מזויף שנכתב כאן, כלומר על ההנחה שכך
+   * ה-HTML מתנהג. מי שיחליף `push(event.detail)` ב-`push(event)` היה מקבל
+   * ירוק, והפיצ'ר היה נשבר בדיוק כפי שנשבר לפני ה-latch.
+   */
+  function runLatchScript(): void {
+    const body = html.slice(
+      html.indexOf('(function () {', html.indexOf(CONTEXT_MENU_LATCH_KEY)),
+      html.indexOf('})();', html.indexOf(CONTEXT_MENU_LATCH_KEY)) + '})();'.length,
+    );
+    new Function(body)();
+  }
+
+  function click(detail: unknown): void {
+    window.dispatchEvent(new CustomEvent('contextMenu.itemClicked', { detail }));
+  }
+
+  it('ה-latch שב-HTML צובר את ה-detail של הלחיצה, ומוסר אותו בריקון', () => {
+    runLatchScript();
+    click({ itemId: SEND_TO_DOCUMENT_ITEM_ID, selectedText: 'ויאמר' });
+
+    expect(takePendingContextMenuClicks()).toEqual([
+      { itemId: SEND_TO_DOCUMENT_ITEM_ID, selectedText: 'ויאמר' },
+    ]);
+  });
+
+  it('אחרי הריקון הוא מפסיק לצבור — המאזין החי הוא היחיד שרואה לחיצות', () => {
+    runLatchScript();
+    takePendingContextMenuClicks();
+    click({ itemId: SEND_TO_DOCUMENT_ITEM_ID });
+
+    expect(takePendingContextMenuClicks()).toEqual([]);
+  });
+
+  it('שומר על תקרה, כדי שלחיצות בזמן שהעורך עולה לא יצטברו בלי גבול', () => {
+    runLatchScript();
+    for (let i = 0; i < 12; i++) click({ itemId: SEND_TO_DOCUMENT_ITEM_ID, selectedText: `${i}` });
+
+    const pending = takePendingContextMenuClicks();
+    expect(pending).toHaveLength(8);
+    // הנשמרות הן האחרונות: לחיצה טרייה רלוונטית יותר מאחת שנדחקה.
+    expect(pending[pending.length - 1]).toEqual({
+      itemId: SEND_TO_DOCUMENT_ITEM_ID,
+      selectedText: '11',
+    });
+  });
+
+  it('מרוקנת את התור ומעבירה את ה-latch למצב חי, כדי שלא יטופל פעמיים', () => {
+    const latch = { queue: [{ itemId: SEND_TO_DOCUMENT_ITEM_ID }], live: false };
+    (window as unknown as Record<string, unknown>)[CONTEXT_MENU_LATCH_KEY] = latch;
+
+    expect(takePendingContextMenuClicks()).toEqual([{ itemId: SEND_TO_DOCUMENT_ITEM_ID }]);
+    expect(latch.live).toBe(true);
+    expect(latch.queue).toEqual([]);
+    expect(takePendingContextMenuClicks()).toEqual([]);
+  });
+
+  it('בלי latch — למשל בבדיקה או בדפדפן — מחזירה ריק ואינה זורקת', () => {
+    expect(takePendingContextMenuClicks()).toEqual([]);
+  });
+
+  it('הפריט שנרשם מ-JS הוא אותו אובייקט שמוצהר במניפסט', () => {
+    expect(SEND_TO_DOCUMENT_ITEM.id).toBe(SEND_TO_DOCUMENT_ITEM_ID);
+    expect(SEND_TO_DOCUMENT_ITEM.openPlugin).toBe(true);
   });
 });

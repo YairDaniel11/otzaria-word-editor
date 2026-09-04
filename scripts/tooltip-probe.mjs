@@ -9,9 +9,11 @@
  *      הייתה מאשרת בירוק בדיוק את המסלול שאינו עובד.
  *   2. **פריסה.** המיקום נמדד מ-`getBoundingClientRect`, ו-jsdom מחזיר אפסים
  *      מכולם — כלומר „הכרטיס בתוך החלון” אינו ניתן לבדיקה שם.
- *   3. **הטולטיפ המולד.** ההסרה של `title` מהעוגן הפעיל קיימת כדי שמערכת
- *      ההפעלה לא תצייר מלבן אפור מעל הכרטיס. שהתכונה חוזרת אחר כך — ולכן שם
- *      הכפתור אינו נעלם — נמדד כאן.
+ *   3. **הטולטיפ המולד.** התקלה שדווחה הייתה כרטיס ומלבן אפור זה מעל זה. מה
+ *      שמונע אותה הוא ש-`title` אינו קיים באף אלמנט, ולכן נמדד כאן **מפקד** על
+ *      הדף הארוז ולא רק על הכפתור שנבדק — כולל `<title>` בתוך SVG, שגם הוא
+ *      מצייר מלבן מולד. השם הנגיש, שהיה תלוי ב-`title`, נמדד גם הוא: הסילוק
+ *      אסור שישתיק כפתור אייקון בפני קורא מסך.
  *
  * הזזת העכבר היא `Input.dispatchMouseEvent` ולא `dispatchEvent` מתוך הדף:
  * אירוע מסונתז ב-JS אינו מזיז את סמן העכבר האמיתי, ולכן `elementFromPoint` היה
@@ -19,7 +21,7 @@
  *
  *   npm run build && node scripts/tooltip-probe.mjs
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openPage, requireChrome, sleep } from './cdp.mjs';
@@ -101,6 +103,48 @@ const TIP_STATE = `(() => {
   };
 })()`;
 
+/**
+ * מפקד `title` על כל הדף.
+ *
+ * הבדיקה על כפתור בודד אינה מספיקה: התקלה שדווחה הייתה על „כיוון פסקה משמאל
+ * לימין”, ומה שמגן עליה הוא שהתכונה אינה קיימת **בשום מקום**. מה שבתוך
+ * `.editor-stack` הוא DOM של המנוע ואינו שלנו.
+ *
+ * „כל הדף” הוא הלשונית הפעילה בלבד: הלשוניות הן `v-if` (ui/ribbon/Ribbon.vue),
+ * ולכן שבע מתוך שמונה אינן ב-DOM בכלל. לכן המפקד רץ בלולאה על כולן — בלי זה
+ * הפרה בלשונית שאינה „בית” עוברת את השער, נמדד.
+ */
+const TITLE_CENSUS = `(() => {
+  const all = Array.from(document.querySelectorAll('[title]'));
+  const ours = all.filter((element) => !element.closest('.editor-stack'));
+  return {
+    total: all.length,
+    ours: ours.length,
+    sample: ours.slice(0, 5).map((element) => element.tagName.toLowerCase() + ': ' + element.getAttribute('title')),
+    svgTitles: document.querySelectorAll('svg title').length,
+    anchors: document.querySelectorAll('[data-tip-title]').length,
+  };
+})()`;
+
+const TAB_LABELS = `(() => Array.from(document.querySelectorAll('.word-tab-btn')).map(
+  (button) => button.textContent.trim(),
+))()`;
+
+const clickTab = (label) => `(() => {
+  const found = Array.from(document.querySelectorAll('.word-tab-btn')).find(
+    (button) => button.textContent.trim() === ${JSON.stringify(label)},
+  );
+  if (!found) return false;
+  found.click();
+  return true;
+})()`;
+
+/** מה שקורא מסך יכריז על הכפתור. `title` היה זה עד עכשיו, ועכשיו `aria-label`. */
+const ACCESSIBLE_NAME = `(() => {
+  const element = document.querySelector('button[data-tip-title="מודגש"]');
+  return element ? element.getAttribute('aria-label') : null;
+})()`;
+
 const nativeTitleOf = (selector) => `(() => {
   const element = document.querySelector(${JSON.stringify(selector)});
   return element ? element.getAttribute('title') : null;
@@ -164,11 +208,41 @@ try {
   });
   if (!(await page.cdp.evaluate(READY))) throw new Error('הרצועה לא נטענה עם תכונות טולטיפ');
 
+  /* 0. המפקד, בכל שמונה הלשוניות. לפני ההמרה נמדדו 61 תכונות `title`. */
+  const tabs = await page.cdp.evaluate(TAB_LABELS);
+  check(tabs.length >= 8, `נמצאו ${tabs.length} לשוניות לסרוק`);
+
+  let ours = 0;
+  let svgTitles = 0;
+  const samples = [];
+  for (const label of tabs) {
+    check(await page.cdp.evaluate(clickTab(label)), `נבחרה הלשונית „${label}”`);
+    await sleep(250);
+    const census = await page.cdp.evaluate(TITLE_CENSUS);
+    ours += census.ours;
+    svgTitles += census.svgTitles;
+    if (census.sample.length) samples.push(`${label}: ${census.sample.join(' | ')}`);
+    console.log(
+      `   „${label}”: ${census.total} title בדף, ${census.ours} מחוץ למנוע, ` +
+        `${census.svgTitles} בתוך svg, ${census.anchors} עוגנים`,
+    );
+    // עוגן אחד לפחות בכל לשונית: „אין title” הוא חצי חוזה, ומה שהופך אותו
+    // למשמעותי הוא שיש טולטיפ במקומו.
+    check(census.anchors > 0, `„${label}”: יש פקדים שמצהירים על טולטיפ`);
+  }
+
+  check(ours === 0, `אין title על אף אלמנט של המעטפת${samples.length ? ' — ' + samples.join(' ; ') : ''}`);
+  check(svgTitles === 0, 'אין <title> בתוך אייקוני SVG — גם הוא מצייר מלבן מולד');
+
+  // חוזרים ל„בית”: שאר השער נשען על „מודגש” ועל „מברשת עיצוב” שיושבים שם.
+  await page.cdp.evaluate(clickTab(tabs[1] ?? 'בית'));
+  await sleep(250);
+
   /* 1. כפתור אייקון עם שלושת השדות — „מודגש”, Ctrl+B, וההסבר. */
   const bold = await page.cdp.evaluate(centerOf('button[data-tip-title="מודגש"]'));
   check(Boolean(bold), 'נמצא כפתור „מודגש” ברצועה');
   if (bold) {
-    check(bold.title === 'מודגש (Ctrl+B)', `title מולד נשמר לפני הריחוף: ${bold.title}`);
+    check(bold.title === null, `אין title מולד על הכפתור: ${JSON.stringify(bold.title)}`);
 
     await hover(page.cdp, bold.x, bold.y);
     const tip = await page.cdp.evaluate(TIP_STATE);
@@ -182,15 +256,18 @@ try {
       check(tip.rect.width > 0 && tip.rect.height > 0, 'לכרטיס יש מידות');
     }
 
-    const suppressed = await page.cdp.evaluate(nativeTitleOf('button[data-tip-title="מודגש"]'));
     check(
-      suppressed === null,
-      `הטולטיפ המולד כבוי בזמן שהכרטיס מוצג (title=${JSON.stringify(suppressed)})`,
+      (await page.cdp.evaluate(nativeTitleOf('button[data-tip-title="מודגש"]'))) === null,
+      'גם בזמן שהכרטיס מוצג אין title — אין מה שיצייר מלבן שני מעליו',
+    );
+    check(
+      (await page.cdp.evaluate(ACCESSIBLE_NAME)) === 'מודגש (Ctrl+B)',
+      'השם הנגיש של כפתור האייקון נשמר ב-aria-label',
     );
 
     await screenshot(page.cdp, join(TMP, 'tooltip-bold.png'));
 
-    /* 2. יציאה — הכרטיס נסגר, וה-title חוזר. */
+    /* 2. יציאה — הכרטיס נסגר, והשכבה לא השאירה דבר על הכפתור. */
     await page.cdp.send('Input.dispatchMouseEvent', {
       type: 'mouseMoved',
       x: 720,
@@ -200,9 +277,8 @@ try {
     await sleep(600);
     check((await page.cdp.evaluate(TIP_STATE)) === null, 'הכרטיס נסגר ביציאת העכבר');
     check(
-      (await page.cdp.evaluate(nativeTitleOf('button[data-tip-title="מודגש"]'))) ===
-        'מודגש (Ctrl+B)',
-      'ה-title המולד חזר לכפתור — שם הכפתור אינו נעלם',
+      (await page.cdp.evaluate(nativeTitleOf('button[data-tip-title="מודגש"]'))) === null,
+      'גם אחרי היציאה אין title — השכבה אינה משאילה ואינה מחזירה כלום',
     );
   }
 
@@ -238,35 +314,41 @@ try {
     console.log('… אין כפתור מנוטרל במסמך שנטען — הדילוג אינו כשל');
   }
 
-  /* 5. פקד שכל תוכנו `title` — הכיסוי-ללא-חיווט, ותזוזה שנייה עליו.
+  /* 5. פקד מחוץ לרצועה — הפס העליון ושורת המצב, ותזוזה שנייה עליו.
 
-     כאן נמדדה התקלה: הכיבוי של הטולטיפ המולד הסיר את `title`, ובפקד שאין לו
-     `data-tip-title` משלו זו בדיוק התכונה שהפכה אותו לעוגן. תזוזה של פיקסל
-     אחד החזירה `null` מ-`anchorAt`, הכרטיס נסגר, ה-`title` חזר, וכעבור 400ms
-     הכול חזר חלילה. שתי התזוזות כאן ולא אחת: הראשונה פותחת, והשנייה היא מה
-     שנשבר. */
-  const bare = await page.cdp.evaluate(`(() => {
-    const found = Array.from(
-      document.querySelectorAll('[title]:not([title=""]):not([data-tip-title])'),
-    ).find((element) => !element.closest('.editor-stack') && element.getBoundingClientRect().width > 4);
+     שני דברים נמדדים כאן. הראשון הוא כיסוי: הפס העליון ושורת המצב אינם
+     בנויים מ-`RibbonButton`, וקל לשכוח אותם בהמרה — עד ההמרה הם קיבלו את
+     הכרטיס דרך נפילה ל-`title`, ומאז הם חייבים להצהיר בעצמם.
+
+     השני הוא ההבהוב שנמדד פעם על `.word-app-badge`: תזוזה של פיקסל אחד על
+     אותו פקד סגרה את הכרטיס, כי הכיבוי הסיר את התכונה שהפכה אותו לעוגן.
+     המנגנון ההוא נמחק, ושתי התזוזות כאן הן מה שמקבע שהוא לא יחזור. */
+  const shell = await page.cdp.evaluate(`(() => {
+    const found = Array.from(document.querySelectorAll('[data-tip-title]')).find(
+      (element) =>
+        !element.closest('.word-ribbon') &&
+        !element.closest('.editor-stack') &&
+        element.getBoundingClientRect().width > 4,
+    );
     if (!found) return null;
     const box = found.getBoundingClientRect();
     return {
-      title: found.getAttribute('title'),
+      tipTitle: found.getAttribute('data-tip-title'),
       x: Math.round(box.left + box.width / 2),
       y: Math.round(box.top + box.height / 2),
     };
   })()`);
-  if (bare) {
-    console.log(`   פקד ללא חיווט: ${bare.title}`);
-    await hover(page.cdp, bare.x, bare.y);
+  check(Boolean(shell), 'נמצא פקד מחוץ לרצועה שמצהיר על טולטיפ');
+  if (shell) {
+    console.log(`   פקד מחוץ לרצועה: ${shell.tipTitle}`);
+    await hover(page.cdp, shell.x, shell.y);
     const opened = await page.cdp.evaluate(TIP_STATE);
-    check(opened?.title === bare.title, `פקד עם title בלבד מקבל כרטיס: ${opened?.title}`);
+    check(opened?.title === shell.tipTitle, `הפס העליון/שורת המצב מקבלים כרטיס: ${opened?.title}`);
 
     await page.cdp.send('Input.dispatchMouseEvent', {
       type: 'mouseMoved',
-      x: bare.x + 1,
-      y: bare.y + 1,
+      x: shell.x + 1,
+      y: shell.y + 1,
       buttons: 0,
     });
     await sleep(400);
@@ -274,8 +356,6 @@ try {
       Boolean(await page.cdp.evaluate(TIP_STATE)),
       'הכרטיס שורד תזוזה נוספת על אותו פקד — בלי זה הוא מהבהב',
     );
-  } else {
-    console.log('… לא נמצא פקד עם title בלבד — הדילוג אינו כשל');
   }
 
   /* 6. Escape מסלק את הכרטיס. */
@@ -302,6 +382,9 @@ try {
   failures += 1;
 } finally {
   page?.close();
+  // כמו שאר השערים: דף הבדיקה אינו נשאר ב-dist. `check:dist` נופל עליו,
+  // ובצדק — הוא אינו חלק מהתוסף.
+  rmSync(path, { force: true });
 }
 
 console.log(failures ? `\n${failures} כשלים` : '\nהכול עבר');

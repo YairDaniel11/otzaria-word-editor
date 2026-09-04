@@ -52,6 +52,7 @@ export const READER_PERMISSIONS: Record<string, string> = {
   'reader.getCurrentState': 'reader.open',
   'reader.getSectionTextMap': 'reader.open',
   'navigation.goTo': 'navigation.write',
+  'reader.addContextMenuItem': 'reader.context_menu',
 };
 
 /**
@@ -267,13 +268,22 @@ function citationSourceText(selection: ReaderSelection | null | undefined): stri
  * מחרוזת ריקה פירושה „אין מה להכניס”, והקורא בממשק הוא שמחליט מה לומר.
  */
 export function buildCitationText(selection: ReaderSelection | null | undefined): string {
-  const text = normalizeSelectedText(citationSourceText(selection));
-  if (!text) return '';
-
   const sections = Array.isArray(selection?.sections) ? selection.sections : [];
-  const ref = normalizeSelectedText(
+  return withRef(
+    citationSourceText(selection),
     firstText(selection?.currentRef, sections[0]?.currentRef),
   );
+}
+
+/**
+ * הצירוף עצמו: טקסט, ואחריו המקור בסוגריים. מופרד מ-`buildCitationText` כדי
+ * שגם המסלול שאין לו `ReaderSelection` מלא — פריט תפריט ההקשר, שעשוי לקבל את
+ * השדות מדור קודם בלבד — ייתן בדיוק את אותו מלל ולא ניסוח שני.
+ */
+function withRef(rawText: string, rawRef: string): string {
+  const text = normalizeSelectedText(rawText);
+  if (!text) return '';
+  const ref = normalizeSelectedText(rawRef);
   return ref ? `${text} (${ref})` : text;
 }
 
@@ -383,4 +393,191 @@ export async function insertCitation(
   }
 
   return { ok: true, value: placement };
+}
+
+/* ===========================================================================
+ *  „שלח למסמך” — פריט בתפריט ההקשר של הקורא
+ * ========================================================================= */
+
+/**
+ * המזהה של הפריט. יציב בין הפעלות, כי `addContextMenuItem` מחליף פריט קיים
+ * לפי `id` — רישום חוזר אחרי `plugin.boot` אינו צורך מקום נוסף במכסה של שני
+ * הפריטים העליונים שאוצריא מקצה לתוסף.
+ */
+export const SEND_TO_DOCUMENT_ITEM_ID = 'otzaria-word-send-to-document';
+
+/**
+ * הפריט עצמו — אובייקט אחד לשני מסלולי הרישום.
+ *
+ * המסלול העיקרי הוא הצהרתי: `contributes.startup.contextMenuItems` במניפסט.
+ * אוצריא רושמת אותו ב-Dart בעליית האפליקציה, בלי להריץ שורת JS אחת, והוא
+ * שורד גם סגירה של לשונית התוסף (`reapply` ב-unregisterController). רישום
+ * מ-JS בלבד חי רק כל עוד המופע חי — כלומר הפריט לא היה קיים בדיוק בתרחיש
+ * שהוא נכתב בשבילו: משתמש שקורא בספרייה ועדיין לא פתח את התוסף.
+ *
+ * הרישום מ-JS אינו מיותר: `app.startup_contributions` היא הרשאה רגישה שמגיעה
+ * **כבויה** בהתקנה (`pluginPermissionDefaultGrant`), וכל עוד המשתמש לא הדליק
+ * אותה ההצהרה אינה מיושמת כלל. `getAll` באוצריא מאחד לפי `(תוסף, id)`, ולכן
+ * שני המסלולים יחד אינם מייצרים פריט כפול.
+ *
+ * `openPlugin: true` הוא הלב: בלעדיו הלחיצה מגיעה רק לתוסף שכבר פתוח, וזה
+ * הפוך מהתרחיש. `title` ולא `label` — `label` הוא הכינוי מדור קודם.
+ *
+ * שני ההקשרים מפורשים, ולא בהשמטת `contexts`: זו ברירת המחדל של אוצריא ממילא,
+ * וכתובה היא מונעת את הצמצום שנראה מתבקש וגוזל את הפיצ'ר. „צורת הדף” אינה
+ * בחירת צורה גרפית — היא תצוגת הטקסט של הגמרא והשו„ע, עם בחירת טקסט מלאה
+ * (`simple_text_viewer.dart` בונה שם אותו `selection` בדיוק), וציטוט משם הוא
+ * בדיוק מה שהפיצ'ר נועד לו.
+ *
+ * tests/unit/manifest.test.ts מקבע שההצהרה במניפסט זהה לאובייקט הזה.
+ */
+export const SEND_TO_DOCUMENT_ITEM = {
+  id: SEND_TO_DOCUMENT_ITEM_ID,
+  title: 'שלח למסמך',
+  icon: 'document_text_24_regular',
+  contexts: ['reader-selection', 'reader-page-shape-selection'],
+  openPlugin: true,
+} as const;
+
+/**
+ * השם של ה-latch ב-`index.html`. מוגדר כאן ושם, ו-
+ * tests/unit/otzaria-reader.test.ts מקבע את הזהות — בדיוק כמו `BOOT_LATCH_KEY`.
+ */
+export const CONTEXT_MENU_LATCH_KEY = '__otzariaContextMenuClicks';
+
+interface ContextMenuLatch {
+  queue: SendToDocumentEvent[];
+  live: boolean;
+}
+
+/**
+ * מרוקנת את התור של ה-latch ומעבירה אותו למצב „חי”.
+ *
+ * זה החצי השני של ה-latch: אוצריא משגרת את אירוע הלחיצה מיד אחרי ה-boot,
+ * והמאזין ב-App.vue נרשם רק אחרי שהבאנדל נטען — פער של שניות שבו אירוע window
+ * פשוט אובד. ה-latch ב-`index.html` צובר, וכאן הצבירה נעצרת: מרגע ש-`live`
+ * דלוק, המאזין החי הוא היחיד שרואה אירועים ואין טיפול כפול. הסדר בקריאה חשוב —
+ * קודם נרשם המאזין, ורק אחר כך מרוקנים, ושניהם באותה משימה סינכרונית.
+ */
+export function takePendingContextMenuClicks(): SendToDocumentEvent[] {
+  const latch = (window as unknown as Record<string, ContextMenuLatch | undefined>)[
+    CONTEXT_MENU_LATCH_KEY
+  ];
+  if (!latch) return [];
+  latch.live = true;
+  return latch.queue.splice(0, latch.queue.length);
+}
+
+/**
+ * כמה זמן פריט התפריט „מחכה” למסמך אחרי שאוצריא העבירה לדף התוסף.
+ *
+ * `openPlugin: true` מוסר את האירוע אחרי סיום ה-boot, אבל ה-boot מסתיים לפני
+ * שהמנוע סיים לפרוס מסמך — 16MB של באנדל ו-workers, כמתועד ב-README. בלי
+ * ההמתנה הזו לחיצה על הפריט כשלשונית התוסף סגורה הייתה נכשלת ב„אין מסמך
+ * פתוח” בדיוק במקרה הנפוץ ביותר: המשתמש קורא בספרייה ורוצה לשלוח קטע.
+ */
+const DOCUMENT_WAIT_MS = 15_000;
+const DOCUMENT_POLL_MS = 150;
+
+/**
+ * הצורה שנצרכת מאירוע הלחיצה (`contextMenu.itemClicked`). מוגדרת כאן ולא
+ * מיובאת מלאה: מהאירוע נדרשים שדות בודדים, והצרה מאפשרת לבדיקות למסור
+ * אובייקט מינימלי.
+ *
+ * הנושא הוא `contextMenu.itemClicked` ולא `reader.context_menu_item_clicked`:
+ * אוצריא יורה את שניהם על אותה לחיצה, אבל רק הראשון מטופס עם `selection`
+ * ב-d.ts הרשמי — והעדפת `sourceSelectedText` על הטקסט המרונדר תלויה בו.
+ */
+export interface SendToDocumentEvent {
+  itemId?: string;
+  selection?: ReaderSelection | null;
+  /** שדה מדור קודם, כשאין `selection` מלא. */
+  selectedText?: string;
+  currentRef?: string | null;
+}
+
+/**
+ * רושמת את הפריט מ-JS — מסלול הגיבוי שמתואר ב-`SEND_TO_DOCUMENT_ITEM`.
+ *
+ * אין הסרה מקבילה, ובכוונה: אוצריא מסירה את רישומי המופע לבד ב-dispose של
+ * הגשר (`removeInstance`), כך שהסרה מ-JS אינה מוסיפה דבר — ורק מסתכנת. אם
+ * הרישום כאן נכשל ואין עותק ברמת המופע, `remove` נופל לרשימה שברמת התוסף,
+ * כלומר מוחק דווקא את הפריט ההצהרתי שאמור לשרוד את סגירת הלשונית.
+ */
+export function registerSendToDocumentItem(): Promise<ReaderResult> {
+  return callAck('reader.addContextMenuItem', 'רישום פריט תפריט ההקשר נכשל', {
+    ...SEND_TO_DOCUMENT_ITEM,
+    contexts: [...SEND_TO_DOCUMENT_ITEM.contexts],
+  });
+}
+
+/**
+ * ממתינה עד שיש מסמך שאפשר להכניס אליו טקסט, או עד שהזמן הקצוב עבר.
+ *
+ * `canInsertText` היא אותה בדיקה שהרצועה עושה לפני שהיא מאפשרת „ציטוט
+ * מהקורא”, ולכן „מוכן” כאן ו„מוכן” שם הם אותה שאלה בדיוק.
+ */
+async function waitForDocument(
+  host: CitationTarget,
+  resolveHost: (() => CitationTarget) | undefined,
+  now: () => number,
+  sleep: (ms: number) => Promise<void>,
+): Promise<CitationTarget> {
+  const deadline = now() + DOCUMENT_WAIT_MS;
+  // חסומה גם במספר הסבבים ולא רק בשעון. `now` מוזרק, וכל מקור זמן שאינו
+  // מתקדם — שעון מזויף בבדיקה, או `performance.now` בטאב ברקע שהדפדפן מקפיא —
+  // היה הופך את ההמתנה ללולאה שאינה נגמרת.
+  const maxAttempts = Math.ceil(DOCUMENT_WAIT_MS / DOCUMENT_POLL_MS);
+  let current = host;
+
+  for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+    if (await canInsertText(current)) return current;
+    if (now() >= deadline) break;
+    await sleep(DOCUMENT_POLL_MS);
+    current = resolveHost ? resolveHost() : current;
+  }
+  return current;
+}
+
+/**
+ * מטפלת בלחיצה על הפריט: בונה את הציטוט מהבחירה ומכניסה אותו למסמך.
+ *
+ * הבנייה עוברת דרך `buildCitationText`, ולכן „שלח למסמך” ו„ציטוט מהקורא”
+ * מייצרים בדיוק את אותו טקסט — כולל העדפת `sourceSelectedText` על הטקסט
+ * המרונדר, שהיא ההבדל בין ציטוט שמשקף את הספר לציטוט שמשקף את המסך.
+ *
+ * לעולם אינה זורקת, מאותו טעם כמו `insertCitation`: היא נקראת מתוך מטפל
+ * אירוע, וחריגה משם אינה נתפסת בשום מקום.
+ */
+export async function handleSendToDocument(
+  event: SendToDocumentEvent | null | undefined,
+  deps: {
+    host: CitationTarget;
+    /** נקראת בכל סבב המתנה — המסמך עשוי להיווצר רק אחרי שהאירוע הגיע. */
+    resolveHost?: () => CitationTarget;
+    now?: () => number;
+    sleep?: (ms: number) => Promise<void>;
+  },
+): Promise<ReaderResult<CitationPlacement>> {
+  if (event?.itemId !== undefined && event.itemId !== SEND_TO_DOCUMENT_ITEM_ID) {
+    return { ok: false, reason: 'other-item', message: '' };
+  }
+
+  // `selection` הוא המסלול הרגיל; השדות השטוחים הם מה שמארח ישן מוסר, ושניהם
+  // מגיעים לאותו `withRef` כדי שלא ייווצר ניסוח שני לאותו ציטוט.
+  const text = event?.selection
+    ? buildCitationText(event.selection)
+    : withRef(event?.selectedText ?? '', event?.currentRef ?? '');
+  if (!text) {
+    return { ok: false, reason: 'empty-text', message: 'שליחת הקטע נכשלה: לא נמצא טקסט מסומן' };
+  }
+
+  const now = deps.now ?? (() => Date.now());
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const host = await waitForDocument(deps.host, deps.resolveHost, now, sleep);
+
+  if (!(await canInsertText(host))) {
+    return { ok: false, reason: 'no-document', message: 'שליחת הקטע נכשלה: אין מסמך פתוח' };
+  }
+  return insertCitation(host, text);
 }

@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import vue from '@vitejs/plugin-vue';
+import { fileURLToPath } from 'node:url';
 
 /**
  * הבדיקות אינן מרימות את מנוע ה-DOCX: הוא דורש workers ו-canvas אמיתיים,
@@ -13,8 +14,15 @@ import vue from '@vitejs/plugin-vue';
  */
 export default defineConfig({
   plugins: [vue()],
+  resolve: {
+    // המודול הוירטואלי של התבנית נוצר רק ב-vite.config.ts; כאן תחליף ריק.
+    alias: {
+      'virtual:otzaria-blank-docx': fileURLToPath(new URL('./tests/support/blank-docx-stub.ts', import.meta.url)),
+    },
+  },
   test: {
-    environment: 'jsdom',
+    // jsdom, עם תיקון ל-webstorage של Node 22+. ראו את הקובץ.
+    environment: './tests/support/jsdom-webstorage.ts',
     include: ['tests/**/*.test.ts'],
   },
 });

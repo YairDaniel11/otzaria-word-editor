@@ -7,7 +7,7 @@
  * זמן, אצל מי שיצא בדרך שלא כיסינו.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { onPluginHidden } from '../../src/host/lifecycle';
+import { onPluginHidden, onPluginShown } from '../../src/host/lifecycle';
 
 /** ה-SDK של אוצריא, בחלק שההאזנה נוגעת בו. */
 function installSdk(): { fire: (event: string) => void; listeners: number } {
@@ -132,6 +132,71 @@ describe('onPluginHidden', () => {
     document.dispatchEvent(new Event('visibilitychange'));
 
     expect(flush).toHaveBeenCalledTimes(2);
+    stop();
+  });
+});
+
+/**
+ * „המשתמש חזר”.
+ *
+ * ההיפוך המדויק של „הלך”, ומאותו טעם שלושה מקורות. מה שתלוי בזה הוא מיקום
+ * הגלילה: הוא אינו שורד את המעבר לרקע בכל המסלולים, ומקור שנשמט פירושו
+ * מסמך שקופץ לראש בגלגול הראשון (sessions/pane-scroll.ts).
+ */
+describe('onPluginShown', () => {
+  it('שלושת המקורות מדווחים: plugin.resumed, visibilitychange ו-pageshow', () => {
+    const sdk = installSdk();
+    const shown = vi.fn();
+    const stop = onPluginShown(shown);
+
+    sdk.fire('plugin.resumed');
+    expect(shown).toHaveBeenCalledTimes(1);
+
+    setVisibility('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(shown).toHaveBeenCalledTimes(2);
+
+    window.dispatchEvent(new Event('pageshow'));
+    expect(shown).toHaveBeenCalledTimes(3);
+
+    stop();
+  });
+
+  it('מעבר להסתרה אינו נחשב חזרה', () => {
+    // אותו אירוע בדיוק מגיע לשני המאזינים, וההבחנה היא ב-`visibilityState`.
+    const shown = vi.fn();
+    const stop = onPluginShown(shown);
+
+    setVisibility('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(shown).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('הביטול מסיר את כל ההרשמות, כולל זו של ה-SDK', () => {
+    const sdk = installSdk();
+    const shown = vi.fn();
+
+    onPluginShown(shown)();
+
+    sdk.fire('plugin.resumed');
+    setVisibility('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('pageshow'));
+
+    expect(shown).not.toHaveBeenCalled();
+    expect(sdk.listeners, 'הרשמת ה-SDK לא נשארה תלויה באוויר').toBe(0);
+  });
+
+  it('בלי SDK — שני מקורות ה-DOM עדיין עובדים', () => {
+    // פיתוח בדפדפן ובדיקות: אין גשר, ואין סיבה שהתיקון לא יפעל שם.
+    const shown = vi.fn();
+    const stop = onPluginShown(shown);
+
+    window.dispatchEvent(new Event('pageshow'));
+
+    expect(shown).toHaveBeenCalledTimes(1);
     stop();
   });
 });

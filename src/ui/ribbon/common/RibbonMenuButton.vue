@@ -4,10 +4,49 @@
     class="ribbon-menu"
     @keydown.escape="onEscape"
   >
+    <!--
+      מצב מפוצל: לחיצה על הגוף מפעילה, לחיצה על החץ פותחת. המעטפת
+      (`.word-split`) חיה ב-styles/ribbon.css יחד עם `.word-btn` שהיא עוטפת.
+    -->
+    <div
+      v-if="split"
+      class="word-split"
+      :class="{ 'word-split--open': isOpen }"
+    >
+      <RibbonButton
+        :icon="icon"
+        :label="label"
+        :variant="variant"
+        :tooltip="tooltip"
+        :description="description"
+        :active="active"
+        :disabled="actionDisabled ?? disabled"
+        @click="$emit('action')"
+      />
+      <button
+        type="button"
+        class="word-split__arrow"
+        :data-tip-title="menuString(menuTooltip || label)"
+        :data-tip-desc="menuDescription ? menuString(menuDescription) : undefined"
+        :aria-label="menuString(menuTooltip || label)"
+        :disabled="disabled"
+        aria-haspopup="menu"
+        :aria-expanded="isOpen ? 'true' : 'false'"
+        @pointerdown.prevent
+        @click="toggle"
+      >
+        <SvgIcon
+          name="chevronDown"
+          :size="8"
+        />
+      </button>
+    </div>
+
     <RibbonButton
+      v-else
       :icon="icon"
       :label="label"
-      variant="large"
+      :variant="variant"
       :active="isOpen"
       :disabled="disabled"
       :tooltip="tooltip"
@@ -67,6 +106,7 @@
  */
 import { ref, onMounted, onUnmounted } from 'vue';
 import RibbonButton from './RibbonButton.vue';
+import SvgIcon from '../../icons/SvgIcon.vue';
 import { menuString } from '../i18n';
 import { usePopoverPosition } from '../../../composables/popover-position';
 
@@ -78,16 +118,59 @@ interface MenuItem {
   hint?: string;
 }
 
-const props = defineProps<{
-  icon: string;
-  label: string;
-  tooltip?: string;
-  disabled?: boolean;
-  items: readonly MenuItem[];
-}>();
+const props = withDefaults(
+  defineProps<{
+    icon: string;
+    label: string;
+    tooltip?: string;
+    disabled?: boolean;
+    items: readonly MenuItem[];
+    /**
+     * הגודל של הכפתור הפותח, בדיוק כמו ב-`RibbonButton`.
+     *
+     * היה כאן `variant="large"` מקודד, וזה החזיק כל עוד כל תפריט היה פקד
+     * ראשי. „מספרי שורות” ו„גבולות עמוד” ב„פריסה” אינם: ב-Word הם שני קטנים
+     * בעמודה לצד ארבעת הגדולים, ובלי ה-prop הזה לא הייתה דרך לומר זאת.
+     *
+     * ברירת המחדל נשארת `large`, ולכן כל אתר קריאה קיים אינו משתנה.
+     */
+    variant?: 'large' | 'small' | 'icon-only';
+    /**
+     * כפתור מפוצל: הגוף מפעיל פעולה (`action`), והחץ פותח את התפריט.
+     *
+     * זו התבנית של „תבליטים” ו„מספור” ב-Word, ושל בורר הצבע כאן — ולכן היא
+     * דגל על הקומפוננטה הזאת ולא קומפוננטה שלישית: הפופאובר, המיקום, סגירת
+     * ה-Escape והלחיצה-בחוץ זהים לחלוטין, ומה שנבדל הוא ראש הפקד בלבד.
+     */
+    split?: boolean;
+    /** מצב לחוץ של כפתור הפעולה. במצב מפוצל בלבד — בלעדיו אין מה לדלוק. */
+    active?: boolean;
+    /**
+     * ניטרול נפרד לכפתור הפעולה. „תבליטים” ו„מספור” נשענים על פקודה
+     * (`bullet-list`) שאינה אותה יכולת כמו התפריט (`canManageLists`), ואחת
+     * מהן יכולה להיות זמינה בלי השנייה. חסר = כמו `disabled`.
+     */
+    actionDisabled?: boolean;
+    /** שורת ההסבר בטולטיפ של כפתור הפעולה — בדיוק כמו ב-`RibbonButton`. */
+    description?: string;
+    /**
+     * שם החץ — הכותרת בטולטיפ וגם השם הנגיש שלו (החץ הוא אייקון בלבד).
+     * חסר = ה-`label` של הפקד.
+     *
+     * שם ולא משפט: שערי ה-QA מאתרים פקד לפי תחילית השם (qa-api.js), וההסבר
+     * שייך ל-`menuDescription`.
+     */
+    menuTooltip?: string;
+    /** שורת ההסבר בטולטיפ של החץ — מה יש בתפריט, או למה הוא מנוטרל. */
+    menuDescription?: string;
+  }>(),
+  { variant: 'large', split: false, active: false },
+);
 
 const emit = defineEmits<{
   (e: 'select', id: string): void;
+  /** לחיצה על גוף הכפתור המפוצל. אינו נפלט במצב הרגיל. */
+  (e: 'action'): void;
 }>();
 
 const containerRef = ref<HTMLElement | null>(null);
@@ -120,7 +203,9 @@ function onEscape(event: KeyboardEvent): void {
   if (!isOpen.value) return;
   event.stopPropagation();
   close();
-  containerRef.value?.querySelector('button')?.focus();
+  // במצב מפוצל הכפתור שפתח הוא החץ, ולא הראשון בסדר ה-DOM.
+  const opener = props.split ? '.word-split__arrow' : 'button';
+  containerRef.value?.querySelector<HTMLElement>(opener)?.focus();
 }
 
 function handleClickOutside(event: PointerEvent): void {

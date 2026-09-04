@@ -77,10 +77,43 @@ export function onPluginHidden(listener: () => void): Unsubscribe {
 }
 
 /**
- * ומה עם „חזר”?
+ * נרשמת לרגע שבו התוסף חוזר למסך. שלושת המקורות הם ההיפוך המדויק של
+ * `onPluginHidden`, ומאותו טעם: אף אחד מהם אינו מכסה את השניים האחרים.
  *
- * `plugin.resumed` אינו נרשם כאן, ובכוונה: אין לתוסף מה לעשות בו. השהיה
- * שומרת את ה-WebView בזיכרון — המסמך, הסמן והתצוגה ממתינים כפי שהיו — ומה
- * שיכול היה להתיישן, ה-URL של הקובץ, נצרך רק ברגע הפתיחה ולא אחריו. מאזין
- * שאינו עושה דבר הוא קוד שמישהו יתחזק בלי שיידע למה.
+ * ## למה יש כאן מאזין בכלל — ההערה שהייתה כאן קודם אמרה שאין
+ *
+ * ההנחה הייתה שהשהיה שומרת את ה-WebView בדיוק כפי שהיה. זה נכון כמעט לגמרי,
+ * ובדיוק ה„כמעט” הוא הבעיה: **מיקום הגלילה** של מסמך אינו שורד את המעבר
+ * לרקע בכל המסלולים. מה שנמדד — ודווח — הוא שהתמונה נראית נכונה בחזרה, אבל
+ * הגלגול הראשון קופץ לראש המסמך, כלומר `scrollTop` האמיתי התאפס.
+ *
+ * הקורא חייב להיות אידמפוטנטי, בדיוק כמו של `onPluginHidden`: ניווט חזרה
+ * באוצריא מייצר גם `plugin.resumed` וגם `visibilitychange`. התיקון עצמו
+ * (sessions/pane-scroll.ts, `repairPaneScroll`) בנוי כך שקריאה שנייה אינה
+ * עושה דבר.
  */
+export function onPluginShown(listener: () => void): Unsubscribe {
+  const disposers: Unsubscribe[] = [];
+
+  if (isAvailable()) {
+    try {
+      disposers.push(on('plugin.resumed', () => listener()));
+    } catch (error) {
+      console.warn('[otzaria-word] ההאזנה ל-plugin.resumed נכשלה', error);
+    }
+  }
+
+  const onVisibility = (): void => {
+    if (document.visibilityState === 'visible') listener();
+  };
+  document.addEventListener('visibilitychange', onVisibility);
+  disposers.push(() => document.removeEventListener('visibilitychange', onVisibility));
+
+  // `pageshow` הוא החזרה מ-bfcache — דף שהוחזר מהמטמון אינו מריץ `load`
+  // מחדש, וכל מה שתלוי ב„הדף נטען” היה מפספס אותו.
+  const onPageShow = (): void => listener();
+  window.addEventListener('pageshow', onPageShow);
+  disposers.push(() => window.removeEventListener('pageshow', onPageShow));
+
+  return offAll(disposers);
+}

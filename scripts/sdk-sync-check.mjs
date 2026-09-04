@@ -24,7 +24,9 @@ const LOCAL = join(HERE, '..', 'src', 'types', 'otzaria_plugin.d.ts');
 /** מבנה התיקיות המקובל: `otzaria-others/` ו-`otzaria-software/` זה לצד זה. */
 const DEFAULT_SOURCE = resolve(
   HERE,
-  '../../../../otzaria-software/otzaria/docs/plugin-sdk/otzaria_plugin.d.ts',
+  // שלוש רמות: scripts → שורש התוסף → `otzaria-others` → ההורה המשותף.
+  // רביעית הייתה מחטיאה, והשער היה מדלג בשקט על המכונה שהוא נכתב בשבילה.
+  '../../../otzaria-software/otzaria/docs/plugin-sdk/otzaria_plugin.d.ts',
 );
 const source = process.env.OTZARIA_SDK ?? DEFAULT_SOURCE;
 

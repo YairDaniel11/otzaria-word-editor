@@ -12,6 +12,7 @@
  * עימוד, אין `@page` ואין הדפסה.
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';
+import { PENDING_CLASS } from '../../src/sessions/editor-swap';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -19,6 +20,7 @@ import {
   ENGINE_PAGE_CLASS,
   PRINT_PAGE_STYLE_ID,
   applyPrintPageSize,
+  measurePrintPageSize,
   pageRule,
   pageSizeText,
   printDocument,
@@ -68,19 +70,84 @@ describe('גלון ההדפסה', () => {
   it('המעטפת מוסתרת — לפי מקומה במעטפת ולא לפי שם כל פס', () => {
     // כלל אחד לכל הצאצאים שאינם אזור המסמך: פקד שיתווסף למעטפת לא ידפיס את
     // עצמו בשקט. הכלל הזה הוא הליבה של התיקון.
-    expect(PRINT_CSS).toContain('.word-app-shell > :not(.editor-stack)');
+    expect(PRINT_CSS).toContain('.word-app-shell > :not(.editor-area)');
     // דיאלוג שעושה Teleport ל-body יוצא מהעץ של המעטפת.
     expect(PRINT_CSS).toContain('body > :not(#app)');
   });
 
+  it('הכלל פוסח על אזור המסמך בשתי הרמות, ולא רק באחת', () => {
+    // הבאג שהבדיקה מקבעת: הכלל נכתב כש-`.editor-stack` היה ילד ישיר של
+    // המעטפת, ומאז נכנס `.editor-area` ביניהם — כלומר הכלל הסתיר את המסמך
+    // עצמו. נמדד במדיית print: `display: none` ורוחב 0 על אזור המסמך.
+    expect(PRINT_CSS).toContain('.editor-area > :not(.editor-stack)');
+    // בלי זה `.editor-area` נשאר `flex` ו-`position: relative` של המסך.
+    const at = PRINT_CSS.indexOf('.editor-area {');
+    expect(at, 'יש בלוק משלו ל-.editor-area').toBeGreaterThan(-1);
+    expect(PRINT_CSS.slice(at, at + 200)).toContain('display: block !important');
+  });
+
+  it('הכלל חל על **כל** רמה בשרשרת אל המסמך — שש, ולא שלוש', () => {
+    // שלוש רמות היו חסרות, וזה נמדד: „פאנל עתידי” של 120px שנשתל כילד נוסף
+    // בכל רמה הודפס ב-`#app`, ב-`.editor-stack` וב-`.document-pane` (ולא
+    // ב-`body`), ו-`body.scrollHeight` במדיית print עלה בדיוק ב-3×120.
+    //
+    // הרשימה כאן היא שרשרת ה-DOM המלאה. מי שמאמת שזו אכן שרשרת ההורות
+    // בפועל הוא tests/component/app-shell.test.ts — סריקת טקסט על CSS אינה
+    // יכולה לדעת מה מכיל את מה, וזו הסיבה שרגרסיית `.editor-area` נכנסה
+    // בירוק דרך כל הבדיקות שכאן.
+    for (const selector of [
+      'body > :not(#app)',
+      '#app > :not(.word-app-shell)',
+      '.word-app-shell > :not(.editor-area)',
+      '.editor-area > :not(.editor-stack)',
+      '.editor-stack > :not(.document-pane)',
+      '.document-pane > :not(.editor-stack__host)',
+    ]) {
+      expect(PRINT_CSS, selector).toContain(selector);
+    }
+
+    // `#app` היא הרמה היחידה שאין לה DOM בבדיקת ההרכבה (שם המעטפת מורכבת
+    // ישר ל-body), ולכן ההנחה עליה מקובעת במקור שלה: index.html ו-main.ts.
+    expect(readFileSync(join(process.cwd(), 'index.html'), 'utf8')).toContain('<div id="app">');
+    expect(readFileSync(join(process.cwd(), 'src/main.ts'), 'utf8')).toContain("mount('#app')");
+  });
+
+  it('פאנל הטאב חוזר לזרימה — אחרת כל השרשרת מעליו בגובה 0', () => {
+    // `:global(.document-pane)` הוא `position: absolute; inset: 0`. נמדד
+    // במדיית print אחרי תיקון הכלל שמעל: העמוד צויר 794×1123, אבל `.editor-area`,
+    // `.editor-stack` ו-`document.body` כולם בגובה 0 — כלומר גיליון אחד חתוך.
+    const at = PRINT_CSS.indexOf('.document-pane {');
+    expect(at, 'יש בלוק משלו ל-.document-pane').toBeGreaterThan(-1);
+    expect(PRINT_CSS.slice(at, at + 200)).toContain('position: static !important');
+  });
+
   it('מיכל הגלילה משוחרר — אחרת נדפס גובה חלון אחד', () => {
-    for (const selector of ['.editor-stack {', '.editor-stack__host {']) {
+    for (const selector of [
+      '.editor-stack {',
+      // עם ה-`:not` — ה-host הממתין נשאר מחוץ לזרימה בכוונה, ראו הבדיקה מתחת.
+      `.editor-stack__host:not(.${PENDING_CLASS}) {`,
+    ]) {
       // תחילת בלוק ולא הופעה כלשהי: `:not(.editor-stack)` הוא הופעה אחרת
       // לגמרי של אותו שם, ובדיקה עליה הייתה עוברת מהסיבה הלא נכונה.
       const at = PRINT_CSS.indexOf(selector);
       expect(at, selector).toBeGreaterThan(-1);
       expect(PRINT_CSS.slice(at, at + 220), selector).toContain('position: static !important');
     }
+  });
+
+  it('ה-host של פתיחה שעוד בדרך אינו חוזר לזרימה — ואינו מוסתר ב-display', () => {
+    // בזמן פתיחה יושבים בפאנל **שניים**: הפעיל, והמועמד שנבנה. לשניהם
+    // `HOST_CLASS`, ולכן שחרור מיכל הגלילה החזיר לזרימה גם את המועמד —
+    // `visibility: hidden` מונע ממנו להיצבע אבל לא מלתפוס שטח, כלומר עמוד
+    // אחרי עמוד של לבן באורך המסמך שהוא בונה.
+    const at = PRINT_CSS.indexOf(`.editor-stack__host:not(.${PENDING_CLASS})`);
+    expect(at, 'שחרור המיכל פוסח על ה-host הממתין').toBeGreaterThan(-1);
+    expect(PRINT_CSS.slice(at, at + 200)).toContain('position: static !important');
+    // ו**לא** `display: none` עליו: styles/shell.css קובע שם במפורש של-host
+    // שנטען חייב להיות box אמיתי, אחרת המנוע מודד עימוד באלמנט בגודל אפס.
+    expect(PRINT_CSS).not.toContain(`.${PENDING_CLASS} {`);
+    // מול הקבוע ולא מול מחרוזת: הכלל שווה כלום אם ה-swap ישנה את השם.
+    expect(PENDING_CLASS).toBe('editor-stack__host--pending');
   });
 
   it('ה-transform של הזום מבוטל — אחרת הדפסה ב-50% יוצאת מוקטנת', () => {
@@ -162,6 +229,70 @@ describe('readPrintPageSize', () => {
   });
 });
 
+/**
+ * המקור השני לגודל הדף, כשהקריאה מהמנוע נכשלה.
+ *
+ * הבאג שהבדיקות כאן מקבעות: `@page` נשאר `margin: 0` **בלי** `size`, כלומר
+ * נייר ברירת המחדל של הדפדפן (Letter, 1056px) מול תיבת עמוד A4 (1122.53px) —
+ * ומסמך של עמוד אחד יצא שני גיליונות, השני ריק.
+ */
+describe('measurePrintPageSize', () => {
+  /**
+   * תיבת עמוד „מצוירת”. ל-jsdom אין פריסה ולכן `offsetWidth` שם הוא 0 תמיד,
+   * והמידות מוזרקות כתכונה על המופע — בדיוק מה שהדפדפן היה מחזיר.
+   */
+  function drawPage(root: Document, width: number, height: number): HTMLElement {
+    const layout = root.createElement('div');
+    layout.className = ENGINE_LAYOUT_CLASS;
+    const page = root.createElement('div');
+    page.className = ENGINE_PAGE_CLASS;
+    Object.defineProperty(page, 'offsetWidth', { value: width, configurable: true });
+    Object.defineProperty(page, 'offsetHeight', { value: height, configurable: true });
+    layout.appendChild(page);
+    root.body.appendChild(layout);
+    return page;
+  }
+
+  function emptyRoot(): Document {
+    return document.implementation.createHTMLDocument('t');
+  }
+
+  it('עמוד A4 מצויר נמדד כאינצ׳ים, ולא נגרר אחרי הזום', () => {
+    const root = emptyRoot();
+    // A4 הוא 793.733×1122.53, ו-`offset*` הן מספרים שלמים — 794×1123.
+    const page = drawPage(root, 794, 1123);
+
+    expect(measurePrintPageSize(root)).toEqual({ widthIn: 8.271, heightIn: 11.698 });
+
+    // 50% זום: `getBoundingClientRect` כולל את ה-transform, ומדידה דרכו
+    // הייתה מייצרת `@page` בחצי גודל הדף. `offset*` אינן רואות אותו.
+    page.getBoundingClientRect = () =>
+      ({
+        width: 397,
+        height: 561.5,
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 397,
+        bottom: 561.5,
+      }) as DOMRect;
+    expect(measurePrintPageSize(root)).toEqual({ widthIn: 8.271, heightIn: 11.698 });
+  });
+
+  it('אין עמוד על המסך, או שאין לו מידה — `null` ולא `@page` מומצא', () => {
+    expect(measurePrintPageSize(emptyRoot())).toBeNull();
+
+    const undrawn = emptyRoot();
+    drawPage(undrawn, 0, 0);
+    expect(measurePrintPageSize(undrawn)).toBeNull();
+
+    const absurd = emptyRoot();
+    drawPage(absurd, 20, 40_000);
+    expect(measurePrintPageSize(absurd)).toBeNull();
+  });
+});
+
 describe('pageRule', () => {
   it('גודל שנקרא נכתב עם margin 0 — בלי שוליים כפולים', () => {
     expect(pageRule({ widthIn: 8.269, heightIn: 11.694 })).toBe(
@@ -238,6 +369,32 @@ describe('printDocument', () => {
     if (outcome.ok) expect(outcome.warning).toContain('גודל הדף');
   });
 
+  it('גודל שלא נקרא נמדד מהעמוד המצויר — אחרת נדפס גיליון ריק על כל עמוד', async () => {
+    // הכשל שנשאר אחרי התיקון המקורי: `@page { margin: 0 }` בלי `size` פירושו
+    // הנייר של הדיאלוג (Letter, 1056px) מול תיבת עמוד A4 (1122.53px), ומסמך
+    // של עמוד אחד יצא שני גיליונות. המנוע כאן אינו עונה (`host` = null), אבל
+    // העמוד כן מצויר — ולכן יש מה למדוד.
+    const root = document.implementation.createHTMLDocument('t');
+    const page = root.createElement('div');
+    page.className = ENGINE_PAGE_CLASS;
+    Object.defineProperty(page, 'offsetWidth', { value: 794 });
+    Object.defineProperty(page, 'offsetHeight', { value: 1123 });
+    root.body.appendChild(page);
+
+    let ruleAtPrintTime: string | null = null;
+    const outcome = await printDocument(null, {
+      root,
+      print: () => {
+        ruleAtPrintTime = root.getElementById(PRINT_PAGE_STYLE_ID)?.textContent ?? null;
+      },
+    });
+
+    expect(ruleAtPrintTime).toBe('@page { size: 8.271in 11.698in; margin: 0; }');
+    // ויש גודל, ולכן גם אין אזהרה: „בדקו את גודל הנייר” על הדפסה שגודל
+    // הנייר שלה נכתב הוא הודעה שגויה.
+    expect(outcome).toEqual({ ok: true, size: { widthIn: 8.271, heightIn: 11.698 } });
+  });
+
   it('דיאלוג הדפסה חסום מחזיר תוצאה מטופסת ולא זריקה', async () => {
     // WebView בלי הרשאת הדפסה זורק, וחריגה במטפל הלחיצה משאירה את המשתמש
     // בלי שום סימן.
@@ -264,12 +421,17 @@ describe('הכפתור מחובר למסלול הזה', () => {
   });
 
   it('אין קובץ אחר שמדפיס בעצמו', () => {
-    const engine = readdirSync(join(process.cwd(), 'src/engine'));
-    for (const file of engine) {
-      if (file === 'print.ts') continue;
+    // רקורסיבי: src/engine מכיל גם תת-תיקיות (shulchan/), וקריאת תיקייה
+    // כקובץ זורקת EISDIR — כלומר הסריקה חייבת לרדת פנימה, לא לדלג.
+    const engine = readdirSync(join(process.cwd(), 'src/engine'), {
+      recursive: true,
+      withFileTypes: true,
+    });
+    for (const entry of engine) {
+      if (!entry.isFile() || entry.name === 'print.ts') continue;
       expect(
-        readFileSync(join(process.cwd(), 'src/engine', file), 'utf8').includes('window.print'),
-        file,
+        readFileSync(join(entry.parentPath, entry.name), 'utf8').includes('window.print'),
+        entry.name,
       ).toBe(false);
     }
   });
@@ -304,14 +466,116 @@ describe('exportPdfDocument', () => {
       withBoth.push(input);
       return { saved: true, name: 'a.pdf' };
     }, { root: fakeRoot(), fileName: 'ספר', title: 'ייצוא' });
-    expect(withBoth[0]).toEqual({ fileName: 'ספר', title: 'ייצוא' });
+    expect(withBoth[0]).toMatchObject({ fileName: 'ספר', title: 'ייצוא' });
 
     const bare: unknown[] = [];
     await exportPdfDocument(fakeHost(), async (input) => {
       bare.push(input);
       return { saved: true, name: 'a.pdf' };
     }, { root: fakeRoot() });
-    expect(bare[0]).toEqual({});
+    expect(bare[0]).not.toHaveProperty('fileName');
+    expect(bare[0]).not.toHaveProperty('title');
+  });
+
+  it('מוסרת לאוצריא את מידות הדף במ"מ, שוליים 0 ורקעים', async () => {
+    const inputs: unknown[] = [];
+    await exportPdfDocument(fakeHost(), async (input) => {
+      inputs.push(input);
+      return { saved: true, name: 'a.pdf' };
+    }, { root: fakeRoot() });
+
+    // fakeHost מחזיר 8.269×11.694 אינץ' (A4 אחרי ceilTo3); ההמרה מעוגלת
+    // כלפי מעלה לשתי ספרות — אותו כיוון כמו האינצ'ים, מאותה סיבה.
+    expect(inputs[0]).toMatchObject({
+      pageSize: { widthMm: 210.04, heightMm: 297.03 },
+      marginMm: 0,
+      printBackgrounds: true,
+    });
+  });
+
+  it('מידות ולא שם — גם ל-A4, כדי לא לסתור את ה-@page שהוזרק', async () => {
+    // הגשר מקבל גם `pageSize: 'a4'`, וזה נראה מדויק יותר — אבל הוא 210×297
+    // מ"מ, ותיבת העמוד שאותו קוד הזריק ל-@page היא 8.269in = 210.033 מ"מ.
+    // נייר צר מהתיבה בשבריר הוא בדיוק מה שהעיגול כלפי מעלה נועד למנוע.
+    const inputs: Array<Record<string, unknown>> = [];
+    await exportPdfDocument(fakeHost(), async (input) => {
+      inputs.push(input as Record<string, unknown>);
+      return { saved: true, name: 'a.pdf' };
+    }, { root: fakeRoot() });
+
+    expect(typeof inputs[0].pageSize).toBe('object');
+    const size = inputs[0].pageSize as { widthMm: number; heightMm: number };
+    expect(size.widthMm).toBeGreaterThanOrEqual(8.269 * 25.4);
+    expect(size.heightMm).toBeGreaterThanOrEqual(11.694 * 25.4);
+  });
+
+  it('דף לרוחב נמסר כמות שהוא, בלי להחליף רוחב וגובה', async () => {
+    const inputs: unknown[] = [];
+    await exportPdfDocument(
+      fakeHost({ items: [{ pageSetup: { width: 11.694, height: 8.269 } }] }),
+      async (input) => {
+        inputs.push(input);
+        return { saved: true, name: 'a.pdf' };
+      },
+      { root: fakeRoot() },
+    );
+
+    expect(inputs[0]).toMatchObject({ pageSize: { widthMm: 297.03, heightMm: 210.04 } });
+  });
+
+  it('`invalid_params` על גודל הדף — סבב שני בלעדיו, והייצוא מצליח באזהרה', async () => {
+    // Host שאינו מכיר את צורת ה-pageSize שנשלחה. הדחייה שם קורית לפני
+    // שנפתח דיאלוג, ולכן הניסיון החוזר אינו יכול לשמור קובץ פעמיים.
+    const inputs: Array<Record<string, unknown>> = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const outcome = await exportPdfDocument(
+      fakeHost(),
+      async (input) => {
+        inputs.push(input as Record<string, unknown>);
+        if ('pageSize' in input) {
+          throw Object.assign(new Error('unknown pageSize'), {
+            code: 'error.invalid_params',
+          });
+        }
+        return { saved: true, name: 'a.pdf' };
+      },
+      { root: fakeRoot() },
+    );
+
+    expect(inputs).toHaveLength(2);
+    expect(inputs[1]).not.toHaveProperty('pageSize');
+    expect(inputs[1]).toMatchObject({ marginMm: 0, printBackgrounds: true });
+    expect(outcome).toMatchObject({ ok: true, saved: true, name: 'a.pdf' });
+    if (outcome.ok && outcome.saved) expect(outcome.warning).toContain('גודל הדף');
+    warn.mockRestore();
+  });
+
+  it('`invalid_params` בלי גודל בכלל אינו מפעיל סבב שני', async () => {
+    // אין `pageSize` בקריאה, ולכן הדחייה אינה עליו — ניסיון חוזר היה
+    // מסתיים באותה דחייה ובקריאה מיותרת לאוצריא.
+    const inputs: unknown[] = [];
+    const outcome = await exportPdfDocument(
+      fakeHost({ omitList: true }),
+      async (input) => {
+        inputs.push(input);
+        throw Object.assign(new Error('bad fileName'), { code: 'error.invalid_params' });
+      },
+      { root: fakeRoot() },
+    );
+
+    expect(inputs).toHaveLength(1);
+    expect(outcome).toMatchObject({ ok: false, reason: 'threw' });
+  });
+
+  it('גודל שלא נקרא — בלי pageSize, אבל שוליים ורקעים עדיין נמסרים', async () => {
+    const inputs: unknown[] = [];
+    await exportPdfDocument(fakeHost({ omitList: true }), async (input) => {
+      inputs.push(input);
+      return { saved: true, name: 'a.pdf' };
+    }, { root: fakeRoot() });
+
+    expect(inputs[0]).not.toHaveProperty('pageSize');
+    expect(inputs[0]).toMatchObject({ marginMm: 0, printBackgrounds: true });
   });
 
   it('ביטול אינו כישלון — ואינו נושא שם', async () => {
@@ -324,18 +588,23 @@ describe('exportPdfDocument', () => {
   });
 
   it('`forbidden` מקבל הסבר שאומר מה לעשות, ולא „הייצוא נכשל”', async () => {
-    const outcome = await exportPdfDocument(
-      fakeHost(),
-      async () => {
-        throw Object.assign(new Error('user activation required'), { code: 'forbidden' });
-      },
-      { root: fakeRoot() },
-    );
-    expect(outcome).toEqual({
-      ok: false,
-      message: 'הייצוא ל-PDF דורש לחיצה ישירה על הכפתור — נסו שוב',
-      reason: 'forbidden',
-    });
+    // שתי הצורות: אוצריא מחזירה `error.forbidden` בפועל (API_REFERENCE
+    // §קודי שגיאה), והתיעוד מזכיר גם קודים בלי הקידומת. השוואה מדויקת
+    // ל-`forbidden` הייתה מפספסת בדיוק את הצורה האמיתית.
+    for (const code of ['forbidden', 'error.forbidden']) {
+      const outcome = await exportPdfDocument(
+        fakeHost(),
+        async () => {
+          throw Object.assign(new Error('user activation required'), { code });
+        },
+        { root: fakeRoot() },
+      );
+      expect(outcome, code).toEqual({
+        ok: false,
+        message: 'הייצוא ל-PDF דורש לחיצה ישירה על הכפתור — נסו שוב',
+        reason: 'forbidden',
+      });
+    }
   });
 
   it('כשל אחר נושא את ההודעה של ה-Host', async () => {
@@ -358,6 +627,36 @@ describe('exportPdfDocument', () => {
     );
     expect(outcome).toMatchObject({ ok: true, saved: true, name: 'b.pdf', size: null });
     expect((outcome as { warning?: string }).warning).toBeTruthy();
+  });
+
+  it('גם הייצוא נופל על מדידת העמוד, ולא על נייר ברירת המחדל', async () => {
+    // אוצריא מייצרת את ה-PDF מדף התוסף עצמו, ולכן `@page` בלי `size` מייצר
+    // בו את אותו גיליון ריק על כל עמוד. שני המסלולים חייבים את שני המקורות.
+    const root = fakeRoot();
+    const page = root.createElement('div');
+    page.className = ENGINE_PAGE_CLASS;
+    Object.defineProperty(page, 'offsetWidth', { value: 816 });
+    Object.defineProperty(page, 'offsetHeight', { value: 1056 });
+    root.body.appendChild(page);
+
+    const seen: string[] = [];
+    const outcome = await exportPdfDocument(
+      fakeHost({ omitList: true }),
+      async () => {
+        seen.push(root.getElementById(PRINT_PAGE_STYLE_ID)?.textContent ?? '');
+        return { saved: true, name: 'b.pdf' };
+      },
+      { root },
+    );
+
+    // Letter: 816×1056 פיקסלים = 8.5×11 אינץ' בדיוק.
+    expect(seen[0]).toBe('@page { size: 8.5in 11in; margin: 0; }');
+    expect(outcome).toEqual({
+      ok: true,
+      saved: true,
+      name: 'b.pdf',
+      size: { widthIn: 8.5, heightIn: 11 },
+    });
   });
 
   it('תשובה בלי שם עדיין נחשבת שמורה, עם נוסח שאינו „undefined”', async () => {

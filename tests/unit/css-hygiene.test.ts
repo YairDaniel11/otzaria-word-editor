@@ -97,10 +97,18 @@ describe('סלקטורים בגלובלים', () => {
   /**
    * מחלקות שה-DOM שלהן שייך למנוע ולא לנו. `.superdoc` הוא ה-wrapper שהמנוע
    * מרנדר, והכלל היחיד שנוגע בו — מרכוז העמוד ב-shell.css — מתועד שם במלואו.
+   * `.superdoc__mutation-status` הוא עוטף באנר ה-`edit-rejected` שהמנוע מצייר
+   * מ-2.11.0, וההסתרה שלו ב-engine-chrome.css מתועדת שם.
+   * `.sd-v2-local-selection-caret` הוא סמן העריכה שהמנוע מייצר, ואנימציית
+   * ההבהוב שלו ב-shell.css והסתרתו ב-print.css מתועדות בחוזה caret-blink.
    * ההחרגה מפורשת ולא „עוברת בטעות” מפני ש-'superdoc' מופיע גם כשם החבילה
    * ב-import: בלעדיה הבדיקה הייתה מאשרת אותו מסיבה לא נכונה.
    */
-  const ENGINE_OWNED = new Set(['superdoc']);
+  const ENGINE_OWNED = new Set([
+    'superdoc',
+    'superdoc__mutation-status',
+    'sd-v2-local-selection-caret',
+  ]);
 
   it('כל מחלקה בסלקטור קיימת בקומפוננטה או בקוד', () => {
     // רק הגלובלים: סגנונות scoped בתוך .vue הם של הקומפוננטה עצמה, ושם

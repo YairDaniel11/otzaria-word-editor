@@ -15,7 +15,7 @@ import { DOMWrapper } from '@vue/test-utils';
 import BookmarkDialog from '../../src/ui/panels/BookmarkDialog.vue';
 import InsertTab from '../../src/ui/ribbon/tabs/InsertTab.vue';
 import { BOOKMARK_NAME_HINT, BOOKMARK_NAME_TAKEN_HINT } from '../../src/engine/bookmarks';
-import { autoUnmount, createSuperdocDouble, mountUi, settle } from './harness';
+import { autoUnmount, createSuperdocDouble, mountUi, settle, tipSelector, tipStartsSelector } from './harness';
 
 autoUnmount();
 
@@ -34,7 +34,7 @@ function footerButton(label: string): DOMWrapper<Element> {
   return new DOMWrapper(found);
 }
 
-const BOOKMARK_BUTTON = 'button[title^="סימון הפסקה"]';
+const BOOKMARK_BUTTON = tipStartsSelector('סימון הפסקה');
 
 describe('BookmarkDialog', () => {
   it('סגור אינו מרונדר בכלל', () => {
@@ -269,7 +269,7 @@ describe('„סימנייה” בלשונית „הוספה”', () => {
     });
     await settle();
 
-    const button = harness.wrapper.find('button[title="הפעולה אינה זמינה בגרסה הזאת של המנוע"]');
+    const button = harness.wrapper.find(tipSelector('הפעולה אינה זמינה בגרסה הזאת של המנוע'));
     expect(button.exists()).toBe(true);
     expect(button.attributes('disabled')).toBeDefined();
   });

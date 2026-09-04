@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { DOMWrapper } from '@vue/test-utils';
 import FontAdvancedDialog from '../../src/ui/panels/FontAdvancedDialog.vue';
 import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
-import { autoUnmount, createSuperdocDouble, mountUi, settle } from './harness';
+import { autoUnmount, createSuperdocDouble, mountUi, settle, tipSelector } from './harness';
 
 autoUnmount();
 
@@ -27,7 +27,7 @@ function footerButton(label: string): DOMWrapper<Element> {
   return new DOMWrapper(found);
 }
 
-const ADVANCED_BUTTON = 'button[title^="גופן מתקדם"]';
+const ADVANCED_BUTTON = tipSelector('מתקדם');
 
 describe('FontAdvancedDialog (בדיד)', () => {
   it('סגור אינו מרונדר בכלל', () => {

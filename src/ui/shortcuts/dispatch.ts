@@ -30,8 +30,11 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
 export interface ShortcutDispatcherDeps {
   /** מריצה פקודת מנוע. אותו מסלול בדיוק של לחיצת כפתור ברצועה. */
   runCommand: (id: CommandId, payload?: unknown) => void;
-  /** מריצה פעולת מעטפת ומחזירה האם טופלה. */
-  runAction: (action: ShellAction) => boolean;
+  /**
+   * מריצה פעולת מעטפת ומחזירה האם טופלה. ה-payload הוא זה של הרשומה, והוא
+   * `undefined` לרוב הפעולות — רק `tab-goto` נבדלת בו בין רשומה לרשומה.
+   */
+  runAction: (action: ShellAction, payload?: unknown) => boolean;
   /** האם דיאלוג מודאלי פתוח כרגע. */
   isModalOpen?: () => boolean;
   /**
@@ -96,7 +99,7 @@ export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): Shortcut
       deps.runCommand(shortcut.command, shortcut.payload);
       handled = true;
     } else if (shortcut.action) {
-      handled = deps.runAction(shortcut.action);
+      handled = deps.runAction(shortcut.action, shortcut.payload);
     }
 
     // הבליעה אחרי ההרצה, ובכוונה: `Ctrl+S` שאינו מריץ שמירה (כי שמירה כבר

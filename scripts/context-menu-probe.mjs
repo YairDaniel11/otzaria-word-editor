@@ -236,6 +236,18 @@ const INSTALL = `(() => {
 
 const page = await openPage(`file:///${PROBE.split('\\').join('/')}`, { label: 'context-menu' });
 const { cdp, close } = page;
+
+/* חלון מפורש, כמו ב-ribbon-geometry-probe. ‏Chrome ב-headless נותן כאן
+   756x413 — נמדד — ואחרי הרצועה ורצועת הטאבים נשארות ארבע שורות טקסט
+   בתוך החלון, בזמן שהמדידה דורשת ארבע נקודות שנוחתות על טקסט. גבול כזה
+   נופל על שינוי גובה כלשהו בממשק ומדווח „המדידה לא רצה”, וזה בדיוק מה
+   שקרה. הגודל אינו נמדד כאן — הוא רק צריך להכיל את מה שנמדד. */
+await cdp.send('Emulation.setDeviceMetricsOverride', {
+  width: 1440,
+  height: 900,
+  deviceScaleFactor: 1,
+  mobile: false,
+});
 const errors = [];
 const notes = [];
 let setupFailure = null;
@@ -263,6 +275,13 @@ async function tripleClick(x, y) {
     await sleep(60);
   }
   await sleep(500);
+}
+
+/** Escape אמיתי דרך CDP. הכרטיס והרשימה שבתוכו נסגרים בו, כל אחד בתורו. */
+async function escape() {
+  await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await sleep(300);
 }
 
 const events = async () => cdp.evaluate('window.__probe.events.splice(0)');
@@ -525,10 +544,12 @@ try {
 
   // ── ש13: אין טולטיפ של מערכת ההפעלה על האייקונים ─────────────────────────
   //
-  // לאייקונים אין תווית גלויה, ולכן יש להם `title` — וזה בדיוק מה שמערכת
-  // ההפעלה מציירת בעצמה, במלבן צהבהב בגופן שאינו של הממשק. `TooltipLayer`
-  // מסיר את התכונה כשהוא פותח כרטיס משלו; מה שנמדד כאן הוא שזה אכן קורה
-  // **בתוך התפריט**, שהוא DOM חדש שהשכבה לא נבנתה מולו.
+  // לאייקונים אין תווית גלויה, ולכן יש להם טולטיפ — ומה שאין להם הוא `title`,
+  // שהוא מה שמערכת ההפעלה מציירת בעצמה במלבן אפור מעל הכרטיס. השכבה אינה
+  // מכבה אותו יותר אלא הוא אינו קיים (`data-tip-*` בלבד, ראו
+  // tests/unit/native-title.test.ts); מה שנמדד כאן הוא ששני חצאי החוזה
+  // מתקיימים **בתוך התפריט**, שהוא DOM חדש שהשכבה לא נבנתה מולו: אין title,
+  // ובכל זאת נפתח כרטיס.
   await click(points.near.x, points.near.y, 'right');
   await sleep(900);
 
@@ -540,9 +561,20 @@ try {
       const icon = document.querySelector('[data-context-menu] [data-entry-id="bold"]');
       if (!icon) return null;
       const box = icon.getBoundingClientRect();
-      return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2), title: icon.getAttribute('title') };
+      return {
+        x: Math.round(box.left + box.width / 2),
+        y: Math.round(box.top + box.height / 2),
+        title: icon.getAttribute('title'),
+        tipTitle: icon.getAttribute('data-tip-title'),
+      };
     })()`);
-    notes.push(`ש13 — ה-title על האייקון לפני ריחוף: ${iconAt?.title ?? '«אין אייקון»'}`);
+    notes.push(
+      `ש13 — title על האייקון לפני ריחוף: ${iconAt ? (iconAt.title ?? '«אין, וכך צריך»') : '«אין אייקון»'}`,
+    );
+
+    if (iconAt && !iconAt.tipTitle) {
+      errors.push('לאייקון בתפריט אין `data-tip-title` — הוא אינו עוגן, ולכן לא יקבל שום טולטיפ');
+    }
 
     if (iconAt) {
       await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: iconAt.x, y: iconAt.y, buttons: 0 });
@@ -574,6 +606,185 @@ try {
   await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await sleep(300);
+
+  // ── ש14: שורת הגופן בכרטיס, והרשימה שנפתחת מתוכה ─────────────────────────
+  //
+  // שני דברים שאין דרך למדוד ב-jsdom, ושניהם שקטים כשהם נשברים:
+  //
+  //   1. **הרשימה של הבורר.** היא `position: fixed` בתוך כרטיס שהוא
+  //      `overflow-y: auto`. jsdom אינו מחשב פריסה ואינו חותך כלום, ולכן רשימה
+  //      שנחתכת נראית שם תקינה לחלוטין. מה שנמדד כאן הוא מה שהמשתמש רואה: האם
+  //      נקודה שבתוך הרשימה **פוגעת** בה, והאם המלבן שלה בתוך החלון — בשני
+  //      הצירים. האופקי אינו קוסמטיקה: הרשימה רחבה מהתיבה בכוונה
+  //      (`width: max-content`, ראו RibbonCombo.vue), ולכן כרטיס שנפתח סמוך
+  //      לקצה מוציא אותה מהחלון בלי לגרוע דבר מהגובה — ובדיקה שמדדה גובה
+  //      בלבד הייתה מאשרת אותה בירוק.
+  //   2. **שני הבוררים מציגים אותו ערך.** זו כל הסיבה שהמצב יצא למעטפת
+  //      (`FONT_MEMORY`), וכאן הרצועה והתפריט חיים באותו דף באמת.
+  //
+  // ## למה שתי נקודות ולא אחת
+  //
+  // `points.near` היא השורה השנייה בחלון, ולכן הכרטיס שם נפתח **למטה** תמיד —
+  // וזה הצד שאינו נשבר. המדידה נכתבה בשביל הכרטיס שאין מקום מתחתיו: הוא
+  // מתהפך `above`, ה-`maxHeight` שלו קטן יותר, ושורת הגופן שבו יורדת לתחתית
+  // הכרטיס (ContextMenu.vue, `drawn`) — כלומר הרשימה נפתחת ממקום אחר לגמרי.
+  // `points.far` היא השורה האחרונה שבחלון, כלומר בדיוק המצב הזה.
+  const sidesSeen = [];
+
+  for (const spot of [
+    { label: 'נקודה עליונה', at: points.near },
+    { label: 'נקודה תחתונה', at: points.far },
+  ]) {
+    await click(spot.at.x, spot.at.y, 'right');
+    await sleep(900);
+
+    /**
+     * לאיזה צד הכרטיס נפתח בפועל, והאם הוא גולל בעצמו.
+     *
+     * נמדד מה-DOM ולא נלקח מהקומפוננטה: השאלה היא מה נמצא על המסך, ושדה פנימי
+     * שמסכים איתו אינו עדות על מדידה שנכשלה.
+     */
+    const card = await cdp.evaluate(`(() => {
+      const card = document.querySelector('[data-context-menu]');
+      if (!card) return null;
+      const box = card.getBoundingClientRect();
+      return {
+        top: Math.round(box.top),
+        bottom: Math.round(box.bottom),
+        height: Math.round(box.height),
+        maxHeight: card.style.maxHeight || '«אין»',
+        scrolls: card.scrollHeight > card.clientHeight + 1,
+      };
+    })()`);
+
+    const side = card ? (card.bottom <= spot.at.y + 4 ? 'above' : 'below') : null;
+    if (side) sidesSeen.push(side);
+    notes.push(
+      `ש14 — ${spot.label} (y=${Math.round(spot.at.y)}): ${
+        card
+          ? `כרטיס ${side}, ${card.top}..${card.bottom} (${card.height}px), max-height=${card.maxHeight}, גולל=${card.scrolls}`
+          : '«הכרטיס לא נפתח»'
+      }`,
+    );
+
+    if (!card) {
+      errors.push(`לחיצה ימנית ב${spot.label} אינה פותחת כרטיס כלל`);
+      continue;
+    }
+
+    const fontPicker = await cdp.evaluate(`(() => {
+      const input = document.querySelector('[data-context-menu] [data-context-menu-control] input');
+      if (!input) return null;
+      const box = input.getBoundingClientRect();
+      const shown = [...document.querySelectorAll('input[data-tip-title="גופן"]')].map((node) => node.value);
+      return {
+        x: Math.round(box.left + box.width / 2),
+        y: Math.round(box.top + box.height / 2),
+        value: input.value,
+        shown,
+      };
+    })()`);
+
+    notes.push(
+      `ש14 — ${spot.label}: בורר הגופן בכרטיס ${
+        fontPicker
+          ? `„${fontPicker.value}”, התיבות שבדף: ${JSON.stringify(fontPicker.shown)}`
+          : '«אין»'
+      }`,
+    );
+
+    if (!fontPicker) {
+      errors.push(
+        `אין בורר גופן בתפריט ההקשר (${spot.label}) — שורת הגופן אינה מצוירת`,
+      );
+      await escape();
+      continue;
+    }
+
+    /*
+      שתי תיבות בדף הן **תנאי למדידה** ולא נתון נוסף: השאלה היא אם הרצועה
+      והכרטיס מציגים אותו דבר, ובלי שתיהן אין מה להשוות. קודם התנאי הזה היה
+      `if (shown.length === 2 && ...)`, כלומר לשונית אחרת ברצועה — או תיבה
+      שנעלמה — היו מבטלות את השער בשקט. שער שמדלג בלי לומר אינו שער.
+    */
+    if (fontPicker.shown.length !== 2) {
+      errors.push(
+        `נמצאו ${fontPicker.shown.length} תיבות גופן בדף במקום שתיים (הרצועה והכרטיס) — ` +
+          `„הזיכרון המשותף” לא נמדד בכלל (${spot.label})`,
+      );
+    } else if (fontPicker.shown[0] !== fontPicker.shown[1]) {
+      errors.push(
+        `בורר הגופן בתפריט מציג „${fontPicker.shown[1]}” בזמן שהרצועה מציגה ` +
+          `„${fontPicker.shown[0]}” — הזיכרון המשותף אינו מגיע לשניהם`,
+      );
+    }
+
+    await click(fontPicker.x, fontPicker.y, 'left');
+    await sleep(500);
+
+    const fontList = await cdp.evaluate(`(() => {
+      const list = document.querySelector('[data-context-menu] [role="listbox"]');
+      if (!list) return { open: false };
+      const box = list.getBoundingClientRect();
+      const x = Math.round(box.left + box.width / 2);
+      const y = Math.round(box.top + 8);
+      const hit = document.elementFromPoint(x, y);
+      return {
+        open: true,
+        height: Math.round(box.height),
+        rect: [
+          Math.round(box.left),
+          Math.round(box.top),
+          Math.round(box.right),
+          Math.round(box.bottom),
+        ],
+        inViewport:
+          box.top >= -1 &&
+          box.bottom <= window.innerHeight + 1 &&
+          box.left >= -1 &&
+          box.right <= window.innerWidth + 1,
+        hits: !!(hit && (list === hit || list.contains(hit))),
+        hitAt: hit ? hit.className || hit.tagName : null,
+      };
+    })()`);
+
+    notes.push(
+      `ש14 — ${spot.label}: רשימת הגופנים מתוך הכרטיס ${
+        fontList.open
+          ? `${fontList.height}px ב-[${fontList.rect}], בחלון=${fontList.inViewport}, נפגעת=${fontList.hits} (${fontList.hitAt})`
+          : '«לא נפתחה»'
+      }`,
+    );
+
+    if (!fontList.open) {
+      errors.push(
+        `לחיצה על בורר הגופן בתפריט אינה פותחת רשימה (${spot.label}) — הפקד אינו שמיש`,
+      );
+    } else if (!fontList.hits || !fontList.inViewport || fontList.height < 24) {
+      errors.push(
+        `רשימת הגופנים שנפתחת מתוך תפריט ההקשר נחתכת (${spot.label}): מלבן ` +
+          `[${fontList.rect}] בחלון ${points.viewport.width}×${points.viewport.height}, ` +
+          `בחלון=${fontList.inViewport}, נפגעת=${fontList.hits}`,
+      );
+    }
+
+    // שתיים: הראשונה סוגרת את הרשימה (הבורר עוצר את Escape), והשנייה את הכרטיס.
+    await escape();
+    await escape();
+  }
+
+  /*
+    המקרה שהמדידה נכתבה בשבילו חייב להיות בין שני המקרים שנמדדו. בלי השורה
+    הזאת, שינוי גובה בממשק או בחלון המדידה היה מחזיר את השער למדוד `below`
+    פעמיים — כלומר לעבור בירוק בלי לגעת בצד שנשבר.
+  */
+  notes.push(`ש14 — הצדדים שנמדדו: ${sidesSeen.join(', ') || '«אף אחד»'}`);
+  if (!sidesSeen.includes('above')) {
+    errors.push(
+      'שתי נקודות המדידה פתחו כרטיס למטה, ולכן המקרה שש14 נכתבה בשבילו — ' +
+        'כרטיס שהתהפך למעלה, שבו שורת הגופן יורדת לתחתית — לא נמדד בכלל',
+    );
+  }
 
   // ── ש6: מה יושב ב-story ──────────────────────────────────────────────────
   const story = await cdp.evaluate(STORY);

@@ -11,7 +11,7 @@
     @keydown="onKeydown"
   >
     <template
-      v-for="(section, index) in sections"
+      v-for="(section, index) in drawn"
       :key="section.id"
     >
       <div
@@ -28,11 +28,18 @@
         <ContextMenuButton
           v-for="entry in section.entries"
           :key="entry.id"
-          :ref="(element) => registerButton(entry.id, element)"
+          :ref="(element) => registerFocuser(entry.id, element)"
           :entry="entry"
-          :layout="section.layout"
+          :layout="buttonLayout(section)"
           :focused="entry.id === focusedId"
           @run="onRun"
+        />
+        <ContextMenuFontPicker
+          v-for="control in section.controls ?? []"
+          :key="control"
+          :ref="(element) => registerFocuser(control, element)"
+          :control="control"
+          @done="onControlDone"
         />
       </div>
     </template>
@@ -63,10 +70,13 @@
  *   נמדד, ורק אז מקבל קואורדינטות — אחרת פריים אחד מצויר בפינה השגויה.
  * - **גלילה סוגרת ואינה ממקמת מחדש.** עוגן-נקודה מתיישן ברגע שהתוכן זז: מלבן
  *   הכפתור זז יחד עם הכפתור, אבל הנקודה שנלחצה נשארת במקום שכבר אין בו כלום.
+ * - **המדידה קובעת גם את סדר הציור.** כרטיס שהתהפך למעלה מצייר את המקטעים
+ *   בסדר הפוך, כדי שמה שצמוד לסמן יישאר צמוד לו. ראו `drawn`.
  */
 import { computed, nextTick, onUnmounted, ref, watch, type ComponentPublicInstance, type CSSProperties } from 'vue';
 import ContextMenuButton from './ContextMenuButton.vue';
-import { contextMenuEntries, type ContextMenuEntry, type ContextMenuSection } from './context-menu-model';
+import ContextMenuFontPicker from './ContextMenuFontPicker.vue';
+import { contextMenuFocusOrder, type ContextMenuEntry, type ContextMenuSection } from './context-menu-model';
 import { contextMenuPlacement, type MenuPoint } from './menu-placement';
 import { isRightToLeft } from '../../composables/popover-position';
 
@@ -94,15 +104,72 @@ const UNMEASURED: CSSProperties = {
 
 const cardStyle = ref<CSSProperties>({ ...UNMEASURED });
 
-const buttons = new Map<string, HTMLElement>();
+/**
+ * לאיזה צד של הנקודה הכרטיס נפתח בפועל. נקבע במדידה (`place`).
+ */
+const side = ref<'below' | 'above'>('below');
 
-function registerButton(id: string, element: Element | ComponentPublicInstance | null): void {
-  const node = (element as ComponentPublicInstance | null)?.$el ?? (element as Element | null);
-  if (node instanceof HTMLElement) buttons.set(id, node);
-  else buttons.delete(id);
+/**
+ * המקטעים בסדר שבו הם **מצוירים**, ולא בסדר שהמודל בנה.
+ *
+ * ## למה
+ *
+ * כשאין מקום מתחת לנקודה הכרטיס מתהפך למעלה, כלומר הקצה **התחתון** שלו נוגע
+ * בסמן. בסדר הרגיל זה מרחיק מהסמן בדיוק את מה שקרוב אליו ביותר בפתיחה למטה:
+ * שורת הלוח, שורת הגופן ושורת העיצוב נוחתות בראש הכרטיס, כלומר בקצה הרחוק,
+ * ובלחיצה בתחתית העמוד — המצב הנפוץ, כי שם נמצא סוף הטקסט — הן דורשות לחזור
+ * עם העכבר לאורך כל הכרטיס.
+ *
+ * ההיפוך שומר על מה שהסדר הזה בא לומר: **המרחק מהסמן**. מה שהיה ראשון בפתיחה
+ * למטה הוא האחרון בפתיחה למעלה, ולכן הוא הצמוד לנקודה בשני המקרים.
+ *
+ * ההיפוך הוא על **מקטעים** ולא על פריטים: מקטע הוא קבוצה שנקראת יחד („קישור”,
+ * „הערת שוליים”), והיפוך בתוכה היה מערבב רשימה ולא מקרב אותה.
+ *
+ * המדידה אינה נעשית שוב אחרי ההיפוך, ואינה צריכה: אותם מקטעים ואותם מפרידים
+ * בסדר אחר הם אותו גובה ואותו רוחב בדיוק.
+ */
+const drawn = computed(() =>
+  side.value === 'above' ? [...props.sections].reverse() : props.sections,
+);
+
+/**
+ * מי מקבל מיקוד, לפי מזהה.
+ *
+ * פונקציה ולא אלמנט, וזה מה שהשתנה כשנוספה שורת הגופן: שם המשטח שמקבל מיקוד
+ * הוא ה-`input` **בתוך** הפקד, ורק הפקד יודע מה בתוכו. כפתור נשאר כפתור —
+ * הסגירה עליו היא `node.focus()`.
+ */
+const focusers = new Map<string, () => void>();
+
+function registerFocuser(id: string, element: Element | ComponentPublicInstance | null): void {
+  const instance = element as (ComponentPublicInstance & { focusSelf?: () => void }) | null;
+  if (typeof instance?.focusSelf === 'function') {
+    focusers.set(id, instance.focusSelf);
+    return;
+  }
+  const node = instance?.$el ?? (element as Element | null);
+  if (node instanceof HTMLElement) focusers.set(id, () => node.focus());
+  else focusers.delete(id);
 }
 
-const entries = computed(() => contextMenuEntries(props.sections));
+/**
+ * צורת הכפתורים במקטע.
+ *
+ * `ContextMenuButton` מכיר שתי צורות בלבד, ומקטע הבוררים אינו מחזיק כפתורים
+ * כלל — ולכן הוא אינו נשאל, והברירה כאן היא בין השתיים שקיימות.
+ */
+function buttonLayout(section: ContextMenuSection): 'icons' | 'items' {
+  return section.layout === 'items' ? 'items' : 'icons';
+}
+
+/**
+ * מזהי כל מה שהחצים עוברים עליו — פריטים ובוררים.
+ *
+ * מ-`drawn` ולא מ-`sections`: החץ למטה חייב להזיז מיקוד למה שנמצא למטה
+ * **על המסך**. בכרטיס שהתהפך זה הסדר ההפוך מזה שהמודל בנה.
+ */
+const focusOrder = computed(() => contextMenuFocusOrder(drawn.value));
 
 function place(): void {
   const card = cardRef.value;
@@ -120,17 +187,53 @@ function place(): void {
     { rtl: isRightToLeft(card) },
   );
 
+  side.value = placement.side;
   cardStyle.value = {
     position: 'fixed',
     top: `${placement.top}px`,
     left: `${placement.left}px`,
     maxHeight: `${placement.maxHeight}px`,
   };
+  // אחרי שהתקרה וההיפוך נכנסו ל-DOM, ולא באותה שורה: `drawn` נגזר מ-`side`,
+  // ולפני העדכון הכרטיס עדיין מצויר בסדר הקודם ובלי `max-height`.
+  void nextTick(revealCaretEdge);
+}
+
+/**
+ * גוללת את הכרטיס אל הקצה שצמוד לסמן.
+ *
+ * ## הבאג שזה סוגר
+ *
+ * כרטיס שהתהפך למעלה מצויר בסדר הפוך (ראו `drawn`), כלומר מה שצמוד לסמן יושב
+ * ב**סוף** ה-DOM. כשהתוכן גבוה מהתקרה הכרטיס נגלל, ו-`scrollTop: 0` מראה
+ * דווקא את הקצה הרחוק — כלומר ההיפוך דוחף מתחת לקו בדיוק את מה שהוא נועד
+ * לקרב. שני התנאים נפגשים בפועל: התקרה נגזרת מהמקום שנשאר מעל הנקודה, ושורת
+ * הגופן הוסיפה לכרטיס מקטע שלם.
+ *
+ * נמדד ב-Chrome על ה-dist, חלון 756×413: `scrollHeight: 326` מול
+ * `clientHeight: 268`, ו„הוסף למילון” — הפריט **היחיד** בכרטיס שנוגע במילה
+ * שנלחצה — נחתך לגמרי. לחיצה לפי המלבן שלו נחתה על `.superdoc-text-run`,
+ * כלומר על המסמך, והתפריט פשוט נסגר (`scripts/qa/spellcheck-qa.mjs`).
+ *
+ * ## למה גלילה ולא ביטול ההיפוך
+ *
+ * זו ההשלמה של ההיפוך ולא עקיפה שלו: מה שהוא מבטיח הוא **מרחק מהסמן**, ואחרי
+ * הגלילה ההבטחה הזאת נכונה בשני המצבים — מה שנראה בלי לגלול הוא מה שקרוב
+ * לנקודה שנלחצה. ביטול ההיפוך היה מחזיר את הפריט למקום נראה ומרחיק אותו
+ * מהעכבר בדיוק בלחיצה בתחתית החלון, שהיא המקרה הנפוץ.
+ *
+ * בפתיחה למטה אין מה לעשות: שם הקצה הצמוד לסמן הוא הראשון, והוא כבר נראה.
+ * כרטיס שאינו נגלל בכלל מקבל השמה שנצמדת לאפס, כלומר no-op.
+ */
+function revealCaretEdge(): void {
+  const card = cardRef.value;
+  if (!card || side.value !== 'above') return;
+  card.scrollTop = card.scrollHeight;
 }
 
 function focusEntry(id: string | null): void {
   focusedId.value = id;
-  if (id) void nextTick(() => buttons.get(id)?.focus());
+  if (id) void nextTick(() => focusers.get(id)?.());
 }
 
 /**
@@ -139,14 +242,35 @@ function focusEntry(id: string | null): void {
  * במקום שהיא תיעלם לו מתחת לחצים.
  */
 function step(delta: number): void {
-  const list = entries.value;
+  const list = focusOrder.value;
   if (list.length === 0) return;
-  const current = list.findIndex((entry) => entry.id === focusedId.value);
+  const current = focusedId.value === null ? -1 : list.indexOf(focusedId.value);
   const next = current === -1 ? 0 : (current + delta + list.length) % list.length;
-  focusEntry(list[next].id);
+  focusEntry(list[next]);
 }
 
 function onKeydown(event: KeyboardEvent): void {
+  // טאב לפני הכול, וגם מתוך בורר: הוא סוגר את הכרטיס תמיד, אחרת המיקוד היה
+  // בורח ממנו והוא היה נשאר פתוח מאחור.
+  if (event.key === 'Tab') {
+    // `preventDefault` כדי שהדפדפן לא ימשיך להזיז מיקוד לתוך כרטיס שנסגר.
+    event.preventDefault();
+    emit('close');
+    return;
+  }
+
+  /**
+   * מקלדת **בתוך בורר** שייכת לבורר: שם החצים פותחים את הרשימה ובוחרים בה,
+   * ו-Home/End מזיזים סמן בטקסט. בלי היציאה הזאת החץ הראשון בתוך רשימת הגופנים
+   * היה קורע את המיקוד ממנה אל הפריט הבא בתפריט.
+   *
+   * Escape אינו נוגע בזה: הוא אינו מטופל כאן בכלל (ראו הערת הראש), והבורר עצמו
+   * עוצר אותו כשהרשימה פתוחה.
+   */
+  if (event.target instanceof Element && event.target.closest('[data-context-menu-control]')) {
+    return;
+  }
+
   const card = cardRef.value;
   // בעברית החץ שמאלה מתקדם בשורת האייקונים, וימינה חוזר.
   const forwardKey = card && isRightToLeft(card) ? 'ArrowLeft' : 'ArrowRight';
@@ -165,17 +289,11 @@ function onKeydown(event: KeyboardEvent): void {
       break;
     case 'Home':
       event.preventDefault();
-      focusEntry(entries.value[0]?.id ?? null);
+      focusEntry(focusOrder.value[0] ?? null);
       break;
     case 'End':
       event.preventDefault();
-      focusEntry(entries.value[entries.value.length - 1]?.id ?? null);
-      break;
-    case 'Tab':
-      // טאב מתפריט הקשר סוגר אותו: הוא אינו אזור בממשק, הוא שכבה מעל הרגע.
-      // `preventDefault` כדי שהדפדפן לא ימשיך להזיז מיקוד לתוך כרטיס שנסגר.
-      event.preventDefault();
-      emit('close');
+      focusEntry(focusOrder.value[focusOrder.value.length - 1] ?? null);
       break;
     default:
       break;
@@ -223,9 +341,12 @@ watch(
   async ([open]) => {
     if (!open) {
       unbind();
-      buttons.clear();
+      focusers.clear();
       focusedId.value = null;
       cardStyle.value = { ...UNMEASURED };
+      // הצד נמדד בכל פתיחה מחדש. בלי האיפוס פתיחה שנייה הייתה מציירת בסדר של
+      // הראשונה עד שהמדידה תחזור — כלומר פריים אחד בסדר הלא נכון.
+      side.value = 'below';
       return;
     }
 
@@ -249,6 +370,21 @@ onUnmounted(unbind);
 
 function onRun(entry: ContextMenuEntry): void {
   emit('run', entry);
+  emit('close');
+}
+
+/**
+ * המשתמש סיים עם בורר הגופן או הגודל. אין `run` להעלות — הפקד הריץ את הפקודה
+ * בעצמו, בדיוק כמו כפתור של פקודת מנוע — ומה שנשאר הוא הסגירה, שהיא ההתנהגות
+ * של כל פעולה אחרת בכרטיס: פעולה אחת, והכרטיס נעלם.
+ *
+ * „סיים” ולא „הוחל”, ובכוונה: הבורר הוא `input`, כלומר הוא לוקח מיקוד — ומי
+ * שאינו מחזיר אותו משאיר את ההקלדה הבאה בתוך התיבה. לכן גם `Escape` בתיבה וגם
+ * בחירת הערך שהיא כבר מציגה סוגרים את הכרטיס, אף שאין להם מה להחיל. את המיקוד
+ * מחזיר הפקד עצמו (`RibbonCombo`, `focusDocument`), והסגירה (`App.vue`,
+ * `closeContextMenu`) מחזירה אותו שוב — כדי שכרטיס לא יישאר פתוח מעל מסמך ממוקד.
+ */
+function onControlDone(): void {
   emit('close');
 }
 
@@ -301,6 +437,13 @@ defineExpose({ place });
 .ctx-menu__section--icons {
   display: flex;
   gap: 2px;
+  padding: 2px;
+}
+
+/* שורת הבוררים: הגופן נמתח, הגודל ברוחב קבוע — הפקדים עצמם קובעים גובה. */
+.ctx-menu__section--fonts {
+  display: flex;
+  gap: 4px;
   padding: 2px;
 }
 

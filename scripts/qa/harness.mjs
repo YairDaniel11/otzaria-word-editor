@@ -10,11 +10,11 @@
  * ריצה מקבילה: כל שער חייב `port` משלו. שני שערים על אותה יציאה מדברים עם
  * אותו דפדפן ומשחיתים זה את מדידתו.
  */
-import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateRawSync } from 'node:zlib';
-import { openPage, requireChrome, sleep } from '../cdp.mjs';
+import { onInterrupt, openPage, requireChrome, sleep } from '../cdp.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(HERE, '..', '..');
@@ -46,6 +46,15 @@ function writeProbe(name, extra = '') {
     console.error('לא נמצא ה-latch ב-dist/index.html — אין לאן להזריק את הבדיקה');
     process.exit(1);
   }
+  /*
+   * דף בדיקה שנשאר משער שמת לפני `close()` נארז לתוך התוסף, ולכן `check:dist`
+   * נכשל עליו — גם כשהריצה הנוכחית נקייה. נמדד: `dist/__qa-fp-p5.html` שנשכח
+   * הפיל את השער הבא, וההרצה שאחריו עברה בלי ששום דבר השתנה. מנקים את מה
+   * שנשאר **לפני** שכותבים, ולא סומכים על ה-`finally` של הריצה שמתה.
+   */
+  for (const stale of readdirSync(DIST)) {
+    if (stale.startsWith('__qa-') && stale.endsWith('.html')) rmSync(join(DIST, stale), { force: true });
+  }
   const probe = join(DIST, `__qa-${name}.html`);
   const inject = `\n<script>${HOST_STUB}</script>\n<script>${QA_API}</script>\n${extra}\n`;
   writeFileSync(probe, html.slice(0, cut) + inject + html.slice(cut));
@@ -60,6 +69,12 @@ function writeProbe(name, extra = '') {
 export async function openApp({ name = 'qa', port = Number(process.env.QA_PORT ?? 9350), extra = '', settle = 3_000 } = {}) {
   requireChrome();
   const probe = writeProbe(name, extra);
+  // Ctrl+C באמצע: הדפדפן נסגר דרך `cdp.mjs`, אבל דף הבדיקה שייך לכאן.
+  const forgetProbe = onInterrupt(() => rmSync(probe, { force: true }));
+  const removeProbe = () => {
+    forgetProbe();
+    rmSync(probe, { force: true });
+  };
   const { cdp, close } = await openPage(`file:///${probe.split('\\').join('/')}`, { port, label: name });
 
   const api = makeApi(cdp);
@@ -78,7 +93,7 @@ export async function openApp({ name = 'qa', port = Number(process.env.QA_PORT ?
     await sleep(settle);
   } catch (error) {
     close();
-    rmSync(probe, { force: true });
+    removeProbe();
     throw error;
   }
 
@@ -92,7 +107,7 @@ export async function openApp({ name = 'qa', port = Number(process.env.QA_PORT ?
         /* הדפדפן ממילא נהרג מיד אחרי */
       }
       close();
-      rmSync(probe, { force: true });
+      removeProbe();
     },
   };
 }
@@ -186,6 +201,8 @@ function makeApi(cdp) {
       js(`JSON.stringify(window.__qa.state(${JSON.stringify(name)}, ${JSON.stringify(opts)}))`).then(JSON.parse),
 
     controls: (scope) => js(`JSON.stringify(window.__qa.controls(${JSON.stringify(scope ?? null)}))`).then(JSON.parse),
+    shadowed: () => js('JSON.stringify(window.__qa.shadowed())').then(JSON.parse),
+    tabs: () => js('JSON.stringify(window.__qa.tabs())').then(JSON.parse),
 
     status: () => js('JSON.stringify(window.__qa.status())').then(JSON.parse),
     messages: () => js('JSON.stringify(window.__qa.messages())').then(JSON.parse),
@@ -196,8 +213,17 @@ function makeApi(cdp) {
     selection: () => js('JSON.stringify(window.__qa.selection())').then(JSON.parse),
     screenText: () => js('window.__qa.screenText()'),
     lineCount: () => js('window.__qa.lineCount()'),
-    selectValue: (name, value) => js(`window.__qa.selectValue(${JSON.stringify(name)}, ${JSON.stringify(value)})`),
-    options: (name) => js(`JSON.stringify(window.__qa.options(${JSON.stringify(name)}))`).then(JSON.parse),
+    /*
+      `Promise.resolve(...)` עוטף את שתי אלה מפני שבורר החיפוש (RibbonCombo)
+      אינו יכול לענות סינכרונית: הרשימה שלו קיימת ב-DOM רק כשהוא פתוח, ו-Vue
+      מרנדר במיקרו-משימה. `Runtime.evaluate` נשלח עם `awaitPromise`, ולכן
+      הביטוי רשאי להחזיר Promise — ובורר `<select>` נייטיב, שכן עונה מיד,
+      עובר דרך אותה עטיפה בלי שינוי בהתנהגות.
+    */
+    selectValue: (name, value) =>
+      js(`Promise.resolve(window.__qa.selectValue(${JSON.stringify(name)}, ${JSON.stringify(value)}))`),
+    options: (name) =>
+      js(`Promise.resolve(window.__qa.options(${JSON.stringify(name)})).then(function (r) { return JSON.stringify(r); })`).then(JSON.parse),
 
 
     /* -------- תפריטים, פופאוברים ודיאלוגים -------- */
@@ -277,13 +303,55 @@ function makeApi(cdp) {
       await sleep(300);
     },
 
-    /** ממקמת סמן בשורת טקסט. בלי זה אין בחירה, וכל פקד מדווח „אין סמן”. */
+    /**
+     * ממקמת סמן בשורת טקסט. בלי זה אין בחירה, וכל פקד מדווח „אין סמן”.
+     *
+     * `lineIndex` **אינו אינדקס פסקה** — ראו `Q.lineRect`. למי שמתכוון לפסקה
+     * מסוימת יש `caretPara`.
+     */
     async caret(lineIndex = 0) {
       const rect = JSON.parse(await js(`JSON.stringify(window.__qa.lineRect(${lineIndex}))`));
       if (!rect) throw new Error('אין שורת טקסט במסמך — אין לאן למקם סמן');
       await clickAt(rect.x, rect.y);
       await sleep(600);
       return rect;
+    },
+
+    paraCount: () => js('window.__qa.paraCount()').then(Number),
+    caretBlock: (timeoutMs = null) => call('caretBlock', timeoutMs),
+
+    /**
+     * ממקמת סמן בפסקה — לפי אינדקס פסקה או לפי הטקסט שבה — **ומאמתת מול
+     * המנוע** שהסמן אכן שם, כי לחיצה שנחתה על השכנה עוברת אחרת בשקט.
+     */
+    async caretPara(target, { attempts = 4, after = 600, verifyMs = 20_000 } = {}) {
+      const where =
+        typeof target === 'number'
+          ? `window.__qa.paraRect(${target})`
+          : `window.__qa.paraRectByText(${JSON.stringify(target)})`;
+      const name = typeof target === 'number' ? `פסקה ${target}` : `הפסקה „${target}”`;
+      /*
+        חימום לפני הלחיצה: `blocks.list` הראשון אחרי מוטציה נמדד ב-390ms מול
+        ~1ms בהמשך, ובלעדיו הקריאה הקרה היא זו שעומדת מול הפעמון.
+      */
+      const warm = await this.caretBlock(verifyMs);
+      if (!warm.answered) throw new Error(`האימות של ${name} לא התבצע — ${warm.why}`);
+
+      let landed = null;
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        // מחדש בכל סבב: reflow מזיז את הגאומטריה בין הלחיצות.
+        const rect = JSON.parse(await js(`JSON.stringify(${where})`));
+        if (!rect) throw new Error(`אין פסקה ${JSON.stringify(target)} במסמך`);
+        await clickAt(rect.x, rect.y);
+        await sleep(after);
+        landed = await this.caretBlock(verifyMs);
+        // „לא ענה” אינו „נחת במקום אחר”, ולכן אינו נספר כנחיתה שגויה.
+        if (!landed.answered) throw new Error(`האימות של ${name} לא התבצע — ${landed.why}`);
+        if (landed.blockId === rect.nodeId) return { ...rect, block: landed };
+        await sleep(400);
+      }
+      const at = landed.text ? `„${landed.text}”` : `בלוק ${landed.blockId}`;
+      throw new Error(`הסמן לא הגיע ל${name} — נחת על ${at}`);
     },
 
     /** בוחרת את השורה כולה: לחיצה בתחילתה וגרירה לסופה. */

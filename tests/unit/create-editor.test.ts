@@ -38,7 +38,9 @@ vi.mock('superdoc', () => ({ SuperDoc: FakeSuperDoc }));
 vi.mock('superdoc/ui', () => ({ createSuperDocUI }));
 vi.mock('superdoc/style.css', () => ({}));
 
-const { createEditor, exceptionToError } = await import('../../src/engine/create-editor');
+const { createEditor, exceptionToError, OPEN_CANCELLED_MESSAGE } = await import(
+  '../../src/engine/create-editor'
+);
 const { headerFooterChrome, textOf } = await import('../support/hf-chrome-dom');
 
 /** המתנה למעבר של ה-MutationObserver שהעברות מתקינה. */
@@ -259,6 +261,93 @@ describe('createEditor', () => {
 
     expect(onError).toHaveBeenCalledTimes(1);
     expect(instance.destroy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * „דלג” בשורת המצב, שמגיע לכאן כ-`signal` דרך `EditorSwap.cancel`.
+ *
+ * מה שנמדד הוא לא „ההבטחה נדחתה” אלא הדבר היחיד שנותן לביטול משמעות: המופע
+ * החצי-בנוי **מפורק**, ואיתו ה-workers שלו. פתיחה שנזנחה בלי זה ממשיכה לבנות
+ * את המסמך עד הסוף — המשתמש לוחץ „דלג”, המחוון נעלם, והמכונה נשארת עמוסה.
+ *
+ * והצד השני, שהוא מסלול איבוד מסמך ולא אי-נוחות: אחרי שהפתיחה הצליחה, איתות
+ * על אותו controller אינו יכול לפרק את המסמך שנפתח.
+ */
+describe('ביטול פתיחה', () => {
+  it('מפרק את המופע החצי-בנוי ודוחה', async () => {
+    const controller = new AbortController();
+    const container = document.createElement('div');
+    const pending = createEditor({ container, signal: controller.signal });
+    const instance = lastInstance()!;
+
+    controller.abort();
+
+    await expect(pending).rejects.toThrow(OPEN_CANCELLED_MESSAGE);
+    expect(instance.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('איתות שהורם עוד לפני הקריאה מפרק גם הוא', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const container = document.createElement('div');
+
+    const pending = createEditor({ container, signal: controller.signal });
+    const instance = lastInstance()!;
+
+    await expect(pending).rejects.toThrow(OPEN_CANCELLED_MESSAGE);
+    expect(instance.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('onReady שמגיע אחרי הביטול אינו מחזיר session', async () => {
+    const controller = new AbortController();
+    const container = document.createElement('div');
+    const pending = createEditor({ container, signal: controller.signal });
+    const instance = lastInstance()!;
+    controller.abort();
+    const assertion = expect(pending).rejects.toThrow(OPEN_CANCELLED_MESSAGE);
+
+    // מנוע שסיים בדיוק ברגע הביטול. ההבטחה כבר הוכרעה, ואין מסמך שמתיישב
+    // על המסך בלי שאיש מחזיק אותו.
+    instance.config.onReady({ superdoc: instance });
+
+    await assertion;
+    expect(instance.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('אחרי פתיחה שהצליחה, איתות אינו נוגע במסמך הפתוח', async () => {
+    const controller = new AbortController();
+    const container = document.createElement('div');
+    const promise = createEditor({ container, signal: controller.signal });
+    const instance = lastInstance()!;
+    instance.config.onReady({ superdoc: instance });
+    const session = await promise;
+
+    controller.abort();
+
+    // ההאזנה מוסרת עם ההכרעה. בלעדיה „דלג” על פתיחה **הבאה** היה מפרק את
+    // המסמך שהמשתמש עובד עליו עכשיו.
+    expect(instance.destroy).not.toHaveBeenCalled();
+    expect(session.superdoc).toBe(instance);
+  });
+
+  it('ביטול מבטל גם את שעון הזמן הקצוב', async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const container = document.createElement('div');
+      const pending = createEditor({ container, timeoutMs: 1000, signal: controller.signal });
+      const instance = lastInstance()!;
+      controller.abort();
+      await expect(pending).rejects.toThrow(OPEN_CANCELLED_MESSAGE);
+
+      await vi.advanceTimersByTimeAsync(5000);
+
+      // פירוק שני על מופע שכבר פורק, מ-callback של שעון שאיש לא ביטל.
+      expect(instance.destroy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

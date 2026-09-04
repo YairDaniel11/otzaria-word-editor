@@ -15,7 +15,8 @@
         <button
           type="button"
           class="pd-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את תפריט הפסקה"
           @click="$emit('close')"
         >

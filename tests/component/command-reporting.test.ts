@@ -15,13 +15,16 @@ import LayoutTab from '../../src/ui/ribbon/tabs/LayoutTab.vue';
 import ReferencesTab from '../../src/ui/ribbon/tabs/ReferencesTab.vue';
 import {
   autoUnmount,
-  buttonByTitle,
-  findButtonByTitle,
+  buttonByTip,
+  findButtonByTip,
   createCommandDouble,
   createSuperdocDouble,
   installSystemClipboard,
   mountUi,
   settle,
+  tipMessage,
+  tipOf,
+  tipSelector,
 } from './harness';
 
 autoUnmount();
@@ -32,7 +35,7 @@ async function chooseFromMenu(
   buttonTitle: string,
   itemLabel: string,
 ): Promise<void> {
-  await buttonByTitle(harness.wrapper, buttonTitle).trigger('click');
+  await buttonByTip(harness.wrapper, buttonTitle).trigger('click');
   const item = harness.wrapper
     .findAll('[role="menuitem"]')
     .find((candidate) => candidate.text().includes(itemLabel));
@@ -47,7 +50,7 @@ describe('כשל של פקודה מנותבת', () => {
     const harness = mountUi(HomeTab, { adapter });
     await settle();
 
-    await buttonByTitle(harness.wrapper, 'מודגש').trigger('click');
+    await buttonByTip(harness.wrapper, 'מודגש').trigger('click');
     await settle();
 
     expect(harness.failures()).toEqual([
@@ -62,7 +65,7 @@ describe('כשל של פקודה מנותבת', () => {
     const harness = mountUi(HomeTab);
     await settle();
 
-    await buttonByTitle(harness.wrapper, 'נטוי').trigger('click');
+    await buttonByTip(harness.wrapper, 'נטוי').trigger('click');
     await settle();
 
     expect(harness.reports).toEqual([{ commandId: 'italic', outcome: { ok: true } }]);
@@ -75,7 +78,7 @@ describe('פקד מנוטרל', () => {
     const harness = mountUi(HomeTab, { adapter });
     await settle();
 
-    const button = buttonByTitle(harness.wrapper, 'מודגש');
+    const button = buttonByTip(harness.wrapper, 'מודגש');
     expect(button.attributes('disabled')).toBeDefined();
 
     await button.trigger('click');
@@ -93,7 +96,7 @@ describe('פקד מנוטרל', () => {
     await settle();
 
     for (const title of ['מודגש', 'תבליטים', 'יישור לימין', 'נקה את כל העיצוב']) {
-      expect(buttonByTitle(harness.wrapper, title).attributes('disabled'), title).toBeDefined();
+      expect(buttonByTip(harness.wrapper, title).attributes('disabled'), title).toBeDefined();
     }
     expect(harness.reports).toEqual([]);
   });
@@ -104,13 +107,13 @@ describe('פקד מנוטרל', () => {
     });
     await settle();
 
-    const columns = harness.wrapper.find('button[title="הפעולה אינה זמינה בגרסה הזאת של המנוע"]');
+    const columns = harness.wrapper.find(tipSelector('הפעולה אינה זמינה בגרסה הזאת של המנוע'));
     expect(columns.exists(), 'ה-tooltip של הפקד המנוטרל הוא ההסבר').toBe(true);
     expect(columns.attributes('disabled')).toBeDefined();
 
     // ושאר הפקדים בקבוצה נשארו זמינים — הכיבוי אינו גורף.
     expect(
-      harness.wrapper.find('button[title="הגדרת שולי הדף (רגיל, צר, רחב)"]').attributes('disabled'),
+      harness.wrapper.find(tipSelector('הגדרת שולי הדף (רגיל, צר, רחב)')).attributes('disabled'),
     ).toBeUndefined();
   });
 
@@ -121,8 +124,8 @@ describe('פקד מנוטרל', () => {
     const buttons = harness.wrapper.findAll('button');
     expect(buttons.length).toBeGreaterThan(0);
     for (const button of buttons) {
-      expect(button.attributes('disabled'), button.attributes('title')).toBeDefined();
-      expect(button.attributes('title')).toBe('המסמך עדיין נטען');
+      expect(button.attributes('disabled'), tipMessage(button)).toBeDefined();
+      expect(tipMessage(button)).toBe('המסמך עדיין נטען');
     }
   });
 });
@@ -144,7 +147,7 @@ describe('החלפת מסמך', () => {
 
     await harness.setSuperdoc(null);
     expect(margins().attributes('disabled'), 'ואחרי סגירת המסמך').toBeDefined();
-    expect(margins().attributes('title')).toBe('המסמך עדיין נטען');
+    expect(tipMessage(margins())).toBe('המסמך עדיין נטען');
   });
 });
 
@@ -208,7 +211,7 @@ describe('כשל של Document API', () => {
     });
     await settle();
 
-    await buttonByTitle(harness.wrapper, 'הוספת הערת שוליים בתחתית העמוד').trigger('click');
+    await buttonByTip(harness.wrapper, 'הוספת הערת שוליים בתחתית העמוד').trigger('click');
     await settle();
 
     expect(harness.failures()).toEqual([
@@ -229,7 +232,7 @@ describe('כשל של Document API', () => {
     });
     await settle();
 
-    await buttonByTitle(harness.wrapper, 'הפסקה שבה הסמן תתחיל בראש עמוד חדש').trigger('click');
+    await buttonByTip(harness.wrapper, 'הפסקה שבה הסמן תתחיל בראש עמוד חדש').trigger('click');
     await settle();
 
     expect(harness.failures()).toEqual([
@@ -247,12 +250,12 @@ describe('כשל של Document API', () => {
   it('„התחל בעמוד חדש” הוא מתג: לחיצה שנייה על אותה פסקה מבטלת', async () => {
     // docs/button-audit.md, שורה ד': הכפתור לא היה מתג — לחיצה תמיד שלחה
     // `true`, ולא הייתה דרך לכבות מהרצועה. כאן נמדד שהלחיצה השנייה שולחת
-    // `false` בפועל, ושהחיווי (aria-pressed, ה-title) עוקב אחריה.
+    // `false` בפועל, ושהחיווי (aria-pressed, שורת ההסבר בטולטיפ) עוקב אחריה.
     const superdoc = createSuperdocDouble();
     const harness = mountUi(InsertTab, { superdoc });
     await settle();
 
-    const button = () => findButtonByTitle(harness.wrapper, 'הפסקה');
+    const button = () => findButtonByTip(harness.wrapper, 'הפסקה');
     expect(button()?.attributes('aria-pressed')).toBe('false');
 
     await button()!.trigger('click');
@@ -262,7 +265,7 @@ describe('כשל של Document API', () => {
       expect.objectContaining({ pageBreakBefore: true, target: expect.objectContaining({ nodeId: 'block-1' }) }),
     ]);
     expect(button()?.attributes('aria-pressed')).toBe('true');
-    expect(button()?.attributes('title')).toContain('כבר מתחילה בעמוד חדש');
+    expect(button()?.attributes('data-tip-desc')).toContain('כבר מתחילה בעמוד חדש');
     expect(harness.failures()).toEqual([]);
 
     await button()!.trigger('click');
@@ -273,7 +276,7 @@ describe('כשל של Document API', () => {
       expect.objectContaining({ pageBreakBefore: false, target: expect.objectContaining({ nodeId: 'block-1' }) }),
     ]);
     expect(button()?.attributes('aria-pressed')).toBe('false');
-    expect(button()?.attributes('title')).toContain('הפסקה שבה הסמן תתחיל בראש עמוד חדש');
+    expect(button()?.attributes('data-tip-desc')).toContain('הפסקה שבה הסמן תתחיל בראש עמוד חדש');
     expect(harness.failures()).toEqual([]);
   });
 });
@@ -286,7 +289,7 @@ describe('לוח', () => {
     });
     await settle();
 
-    await buttonByTitle(harness.wrapper, 'העתקת הבחירה ללוח').trigger('click');
+    await buttonByTip(harness.wrapper, 'העתקת הבחירה ללוח').trigger('click');
     await settle();
     restore();
 
@@ -310,8 +313,8 @@ describe('לוח', () => {
     await settle();
 
     const buttons = harness.wrapper.findAll('button');
-    const cut = buttons.find((button) => button.attributes('title')?.includes('Ctrl+X'));
-    const copy = buttons.find((button) => button.attributes('title')?.includes('Ctrl+C'));
+    const cut = buttons.find((button) => tipOf(button).shortcut === 'Ctrl+X');
+    const copy = buttons.find((button) => tipOf(button).shortcut === 'Ctrl+C');
 
     expect(cut?.attributes('disabled')).toBeDefined();
     expect(copy?.attributes('disabled')).toBeUndefined();
@@ -324,7 +327,7 @@ describe('לוח', () => {
     const harness = mountUi(HomeTab, { superdoc });
     await settle();
 
-    await buttonByTitle(harness.wrapper, 'בחירת כל הטקסט במסמך').trigger('click');
+    await buttonByTip(harness.wrapper, 'בחירת כל הטקסט במסמך').trigger('click');
     await settle();
 
     expect(superdoc.inputs('ranges.resolve')).toEqual([

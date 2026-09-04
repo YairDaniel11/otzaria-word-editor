@@ -6,8 +6,11 @@
         icon="proofing"
         label="בדיקת איות"
         variant="large"
-        tooltip="בדיקת איות בעברית — תתווסף עם המילון התורני, בשלב נפרד"
-        :disabled="true"
+        :tooltip="spellcheckTooltip"
+        :active="spellcheck.enabled.value"
+        :disabled="spellcheck.busy.value"
+        @pointerdown.prevent
+        @click="spellcheck.toggle()"
       />
     </RibbonGroup>
 
@@ -50,25 +53,34 @@
       />
     </RibbonGroup>
 
-    <!-- שינויים -->
+    <!--
+      „שינויים”. שני הפקדים על השינוי הנוכחי גדולים, ושני פקדי „הכל” במחסנית
+      לצידם — הצורה של Word, שם „קבל” ו„דחה” הם שני כפתורים גדולים ווריאנטי
+      „הכל” יושבים בתפריט שמתחתם.
+
+      זו גם הקבוצה שבגללה כל הרצועה קפצה: היא החזיקה מחסנית של **ארבעה**
+      כפתורים קטנים (102px), הרצועה כאן יצאה 126px מול 96px בכל שאר הלשוניות,
+      והמסמך זז 30px בכל כניסה ויציאה מהלשונית. ארבעה בעמודה אחת גם לא היה
+      קריא: „קבל/דחה/קבל הכל/דחה הכל” הוא סולם, ולא שני צמדים.
+    -->
     <RibbonGroup title="שינויים">
-      <div class="column-items">
-        <RibbonButton
-          icon="accept"
-          label="קבל שינוי"
-          variant="small"
-          tooltip="קבלת השינוי הנוכחי"
-          :disabled="!acceptCmd.enabled.value"
-          @click="acceptCmd.run()"
-        />
-        <RibbonButton
-          icon="reject"
-          label="דחה שינוי"
-          variant="small"
-          tooltip="דחיית השינוי הנוכחי"
-          :disabled="!rejectCmd.enabled.value"
-          @click="rejectCmd.run()"
-        />
+      <RibbonButton
+        icon="accept"
+        label="קבל שינוי"
+        variant="large"
+        tooltip="קבלת השינוי הנוכחי"
+        :disabled="!acceptCmd.enabled.value"
+        @click="acceptCmd.run()"
+      />
+      <RibbonButton
+        icon="reject"
+        label="דחה שינוי"
+        variant="large"
+        tooltip="דחיית השינוי הנוכחי"
+        :disabled="!rejectCmd.enabled.value"
+        @click="rejectCmd.run()"
+      />
+      <RibbonStack>
         <RibbonButton
           icon="accept"
           label="קבל את כל השינויים"
@@ -85,7 +97,7 @@
           :disabled="!rejectAllCmd.enabled.value"
           @click="rejectAllCmd.run()"
         />
-      </div>
+      </RibbonStack>
     </RibbonGroup>
   </div>
 </template>
@@ -114,17 +126,22 @@
  * `viewing`, לא ב-`suggesting`) — וזה נכון: אי אפשר גם לחסום קלט וגם להשאיר
  * מעקב פעיל. הביטול משחזר את `'suggesting'`, לא רק את `enforced`.
  *
- * **שני פקדים מנוטרלים במפורש, ולא כפתור מת:**
- *   - „בדיקת איות” היא שלב שלם בתכנית (§13.2): ספק איות תורני, המרת המילון
- *     למודול נתונים, ו-offsets ב-UTF-16 שמכבדים ניקוד וטעמים. הקיצור `F7`
- *     שהוצג כאן לא היה רשום בשום מקום והוסר.
- *   - „תגובה חדשה” דורשת טקסט תגובה **וזהות מחבר קבועה מהגדרת משתמש מקומית**
- *     (§13.1). זהות המשתמש אינה קיימת עדיין בהגדרות, ותגובה בלי מחבר אינה
- *     תגובה. חצי מימוש כאן היה יוצר מערכת תגובות מקבילה — בדיוק מה שהתכנית
- *     אוסרת.
+ * **„בדיקת איות” היא מתג של שכבת התצוגה שלנו, לא פקודת מנוע.** אין למנוע
+ * פקודת איות ואין לו decorations שמותר לנו לקרוא להם, ולכן הסימון הוא שכבה
+ * מעל המסמך (ui/shell/SpellingOverlay.vue) והמצב מגיע מ-`SPELLCHECK`
+ * (composables/keys.ts) ולא מ-`useCommand`. הלחיצה הראשונה גם **מושכת את
+ * המילון** — נכס נפרד של 1.3MB (issue #25, engine/spellcheck-dictionary.ts) —
+ * ולכן `busy` מנטרל את הכפתור בזמן הטעינה במקום להשאיר אותו נראה-מת. הקיצור
+ * `F7` שהוצג כאן פעם לא היה רשום בשום מקום והוסר.
+ *
+ * **„תגובה חדשה” מנוטרלת במפורש, ולא כפתור מת:** היא דורשת טקסט תגובה
+ * **וזהות מחבר קבועה מהגדרת משתמש מקומית** (§13.1). זהות המשתמש אינה קיימת
+ * עדיין בהגדרות, ותגובה בלי מחבר אינה תגובה. חצי מימוש כאן היה יוצר מערכת
+ * תגובות מקבילה — בדיוק מה שהתכנית אוסרת.
  */
 import { computed, inject, ref, shallowRef, watch } from 'vue';
 import RibbonGroup from '../common/RibbonGroup.vue';
+import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import { useCommand } from '../../../composables/useCommand';
 import {
@@ -133,7 +150,13 @@ import {
   syncProtectionRuntime,
 } from '../../../engine/protection';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
-import { COMMAND_ADAPTER, COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
+import {
+  COMMAND_ADAPTER,
+  COMMAND_REPORTER,
+  SPELLCHECK,
+  type CommandReporter,
+  type SpellcheckHandle,
+} from '../../../composables/keys';
 
 const acceptCmd = useCommand('acceptChange');
 const rejectCmd = useCommand('rejectChange');
@@ -142,6 +165,25 @@ const rejectAllCmd = useCommand('rejectAllChanges');
 const modeCmd = useCommand('document-mode');
 
 const isSuggesting = computed(() => modeCmd.value.value === 'suggesting');
+
+/* ------------------------------------------------------------------ */
+/* בדיקת איות תורנית                                                   */
+/* ------------------------------------------------------------------ */
+
+/** ברירת מחדל מנוטרלת: בהרכבת רכיב בלי המעטפת הכפתור פשוט אינו עושה כלום. */
+const spellcheckFallback: SpellcheckHandle = {
+  enabled: ref(false),
+  busy: ref(false),
+  toggle: () => {},
+};
+const spellcheck = inject(SPELLCHECK, spellcheckFallback);
+
+const spellcheckTooltip = computed(() => {
+  if (spellcheck.busy.value) return 'טוען את המילון התורני…';
+  return spellcheck.enabled.value
+    ? 'כיבוי בדיקת האיות התורנית'
+    : 'סימון מילים שאינן במילון התורני. לחיצה ימנית על מילה מסומנת מאפשרת להוסיף אותה למילון';
+});
 
 /* ------------------------------------------------------------------ */
 /* הגנת מסמך (גל 19)                                                   */
@@ -250,13 +292,5 @@ function onToggleTrackChanges(): void {
   align-items: stretch;
   gap: 0;
   height: 100%;
-}
-
-.column-items {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  justify-content: center;
-  flex-shrink: 0;
 }
 </style>

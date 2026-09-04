@@ -57,7 +57,7 @@ const expr = `(async () => {
   let engineEnabledAt = null;
 
   while (Date.now() < deadline) {
-    const btn = q('button[title="' + FIT_TITLE + '"]');
+    const btn = q('button[data-tip-title="' + FIT_TITLE + '"],button[data-tip-desc="' + FIT_TITLE + '"]');
     const sd = window.__otzariaEditor?.superdoc;
     const engineEnabled = Boolean(sd?.ui?.commands?.get('zoom-fit-width')?.getState?.().enabled);
     if (engineEnabled && engineEnabledAt === null) engineEnabledAt = Date.now();

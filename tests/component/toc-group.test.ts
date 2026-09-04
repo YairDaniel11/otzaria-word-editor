@@ -13,7 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import { DOMWrapper } from '@vue/test-utils';
 import ReferencesTab from '../../src/ui/ribbon/tabs/ReferencesTab.vue';
-import { autoUnmount, createSuperdocDouble, mountUi, settle, type Harness } from './harness';
+import { autoUnmount, createSuperdocDouble, mountUi, settle, tipMessage, type Harness } from './harness';
 
 autoUnmount();
 
@@ -71,7 +71,7 @@ describe('„עדכן טבלה”', () => {
     const harness = mountUi(ReferencesTab);
     await settle();
 
-    expect(button(harness, 'עדכן טבלה').attributes('title')).toBe(
+    expect(tipMessage(button(harness, 'עדכן טבלה'))).toBe(
       'אין במסמך תוכן עניינים לעדכן',
     );
 

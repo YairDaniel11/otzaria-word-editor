@@ -50,6 +50,37 @@ describe('FindReplaceDialog', () => {
     expect(document.activeElement).toBe(harness.wrapper.find('#fr-search-input').element);
   });
 
+  /**
+   * „חפש במסמך” של Tell Me מגיע כ-`initialQuery`. הוא של אותה פתיחה בלבד:
+   * פתיחה רגילה (ריקה) חייבת לשמור את מה שהמשתמש חיפש קודם, כמו ב-Word.
+   */
+  it('שאילתה מבחוץ נכנסת בפתיחה, וגם בדיאלוג שכבר פתוח', async () => {
+    const harness = mountUi(FindReplaceDialog, { props: { isOpen: false, initialQuery: 'אלף' } });
+    await harness.wrapper.setProps({ isOpen: true });
+    await settle();
+
+    const input = harness.wrapper.find<HTMLInputElement>('#fr-search-input');
+    expect(input.element.value).toBe('אלף');
+    expect(harness.wrapper.emitted('query-change')).toEqual([['אלף']]);
+
+    await harness.wrapper.setProps({ initialQuery: 'בית' });
+    await settle();
+    expect(input.element.value).toBe('בית');
+  });
+
+  it('פתיחה בלי שאילתה מבחוץ אינה מוחקת את החיפוש האחרון', async () => {
+    const harness = mountUi(FindReplaceDialog, { props: { isOpen: true } });
+    await settle();
+
+    const input = harness.wrapper.find<HTMLInputElement>('#fr-search-input');
+    await input.setValue('גימל');
+    await harness.wrapper.setProps({ isOpen: false });
+    await harness.wrapper.setProps({ isOpen: true });
+    await settle();
+
+    expect(input.element.value).toBe('גימל');
+  });
+
   it('מונה התוצאות מוצג כהודעת מצב חיה', async () => {
     const harness = mountUi(FindReplaceDialog, {
       props: { isOpen: true, resultText: '3 מתוך 12' },

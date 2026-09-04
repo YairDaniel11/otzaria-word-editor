@@ -14,15 +14,29 @@ import {
   type SessionKeeper,
   type SessionKeeperDeps,
 } from '../../src/sessions/session-keeper';
-import { DRAFT_PATH, emptySession, type SessionState } from '../../src/sessions/session-state';
+import {
+  activeEntry,
+  draftPathFor,
+  emptySession,
+  withActiveEntry,
+  type SessionState,
+} from '../../src/sessions/session-state';
 import type { CaretAnchor } from '../../src/engine/caret-anchor';
 import type { WorkspaceWrite } from '../../src/host/workspace';
 
 const anchor: CaretAnchor = { start: { blockId: 'b3', ordinal: 2, offset: 5 }, end: null };
 
+/** נתיב הטיוטה שהבדיקות משתמשות בו — מסמך יחיד, כמו במציאות של היום. */
+const DRAFT_PATH = draftPathFor('test-doc');
+
 /** הרשומה האחרונה שנכתבה. `at(-1)` אינו ב-lib של הפרויקט. */
 function last(records: SessionState[]): SessionState {
   return records[records.length - 1];
+}
+
+/** הרשומה הפעילה מתוך הרשומה האחרונה שנכתבה — הצורה החדשה היא אוסף. */
+function lastEntry(records: SessionState[]) {
+  return activeEntry(last(records));
 }
 
 interface Harness {
@@ -59,6 +73,7 @@ function harness(): Harness {
   };
 
   const deps: SessionKeeperDeps = {
+    id: 'test-doc',
     persist: async (snapshot) => {
       state.persisted.push(structuredClone(snapshot));
     },
@@ -165,7 +180,7 @@ describe('הרשומה', () => {
 
     await h.tick(PERSIST_DELAY_MS);
     expect(h.persisted).toHaveLength(1);
-    expect(h.persisted[0].caret).toEqual(anchor);
+    expect(activeEntry(h.persisted[0])?.caret).toEqual(anchor);
   });
 
   it('סמן שלא נקרא אינו מוחק את מה שכבר ידענו', async () => {
@@ -180,7 +195,7 @@ describe('הרשומה', () => {
     h.keeper.noteChange();
     await h.tick(PERSIST_DELAY_MS);
 
-    expect(h.persisted[1].caret).toEqual(anchor);
+    expect(activeEntry(h.persisted[1])?.caret).toEqual(anchor);
   });
 
   it('מצב תצוגה שלא השתנה אינו מייצר כתיבה', async () => {
@@ -232,7 +247,7 @@ describe('הטיוטה', () => {
 
     await h.tick(DRAFT_DELAY_MS);
 
-    expect(last(h.persisted).draft).toMatchObject({
+    expect(lastEntry(h.persisted)?.draft).toMatchObject({
       path: DRAFT_PATH,
       documentToken: 'tok',
       sourceSize: 4_096,
@@ -275,7 +290,7 @@ describe('הטיוטה', () => {
     h.dirty = true;
     h.keeper.noteChange();
     await h.tick(DRAFT_DELAY_MS);
-    const written = last(h.persisted).draft;
+    const written = lastEntry(h.persisted)?.draft;
     expect(written).not.toBeNull();
 
     h.writeResult = 'failed';
@@ -283,7 +298,7 @@ describe('הטיוטה', () => {
     await h.tick(DRAFT_MAX_WAIT_MS);
 
     expect(h.removals, 'אין למחוק עבודה בגלל כתיבה שנכשלה').toBe(0);
-    expect(last(h.persisted).draft).toEqual(written);
+    expect(lastEntry(h.persisted)?.draft).toEqual(written);
   });
 
   it('כתיבה שנכשלה מנסה שוב בסבב הבא', async () => {
@@ -342,7 +357,7 @@ describe('הטיוטה', () => {
     await h.keeper.noteSaved(8_192);
 
     expect(h.removals).toBe(1);
-    expect(last(h.persisted).draft).toBeNull();
+    expect(lastEntry(h.persisted)?.draft).toBeNull();
   });
 
   it('מעבר למסמך אחר **אינו** מוחק את הטיוטה', async () => {
@@ -360,7 +375,7 @@ describe('הטיוטה', () => {
     await h.tick(0);
 
     expect(h.removals).toBe(0);
-    expect(last(h.persisted).draft, 'המצביע נשאר, ועדיין מסומן בבעליו').toMatchObject({
+    expect(lastEntry(h.persisted)?.draft, 'המצביע נשאר, ועדיין מסומן בבעליו').toMatchObject({
       documentToken: 'a',
     });
   });
@@ -375,7 +390,7 @@ describe('הטיוטה', () => {
     await h.keeper.discardDraft();
 
     expect(h.removals).toBe(1);
-    expect(last(h.persisted).draft).toBeNull();
+    expect(lastEntry(h.persisted)?.draft).toBeNull();
   });
 
   it('גודל הקובץ מהשמירה מגיע לטיוטה הבאה', async () => {
@@ -394,7 +409,7 @@ describe('הטיוטה', () => {
     h.keeper.noteChange();
     await h.tick(DRAFT_DELAY_MS);
 
-    expect(last(h.persisted).draft).toMatchObject({ sourceSize: 1_500 });
+    expect(lastEntry(h.persisted)?.draft).toMatchObject({ sourceSize: 1_500 });
   });
 
   it('שמירה שהסתיימה בזמן כתיבת טיוטה אינה משאירה מצביע לקובץ שנמחק', async () => {
@@ -410,7 +425,7 @@ describe('הטיוטה', () => {
     await Promise.all([writing, saving]);
     await h.tick(0);
 
-    expect(last(h.persisted).draft, 'הרשומה והדיסק חייבים להסכים').toBeNull();
+    expect(lastEntry(h.persisted)?.draft, 'הרשומה והדיסק חייבים להסכים').toBeNull();
   });
 
   it('טיוטה שנשמרת עוברת לבעלות המסמך שנפתח ממנה', async () => {
@@ -422,12 +437,12 @@ describe('הטיוטה', () => {
     h.dirty = true;
     h.keeper.noteChange();
     await h.tick(DRAFT_DELAY_MS);
-    expect(last(h.persisted).draft).toMatchObject({ documentToken: 'a', sourceSize: 500 });
+    expect(lastEntry(h.persisted)?.draft).toMatchObject({ documentToken: 'a', sourceSize: 500 });
 
     h.keeper.setDocument(null, { keepDraft: true });
     await h.tick(0);
 
-    expect(last(h.persisted).draft).toMatchObject({ documentToken: null, sourceSize: null });
+    expect(lastEntry(h.persisted)?.draft).toMatchObject({ documentToken: null, sourceSize: null });
   });
 
   it('פתיחה **מתוך** הטיוטה משאירה אותה על הדיסק', async () => {
@@ -443,7 +458,7 @@ describe('הטיוטה', () => {
     await h.tick(0);
 
     expect(h.removals).toBe(0);
-    expect(last(h.persisted).draft).not.toBeNull();
+    expect(lastEntry(h.persisted)?.draft).not.toBeNull();
   });
 });
 
@@ -458,21 +473,22 @@ describe('הסמן מול החלפת מסמך', () => {
     h.keeper.setDocument({ token: 'b', name: 'ב.docx', writable: true });
     await h.tick(0);
 
-    expect(last(h.persisted).caret, 'סמן של מסמך אחד ברשומה של אחר').toBeNull();
+    expect(lastEntry(h.persisted)?.caret, 'סמן של מסמך אחד ברשומה של אחר').toBeNull();
   });
 
   it('נשמר כשאותו מסמך נפתח מחדש', async () => {
     // זה בדיוק המסלול שהתכונה נכתבה בשבילו; מחיקה תמידית הייתה מאבדת אותו.
     const h = harness();
-    h.keeper.adopt({
-      ...emptySession(),
-      document: { token: 'a', name: 'א.docx', writable: true },
-      caret: anchor,
-    });
+    h.keeper.adopt(
+      withActiveEntry(emptySession(), {
+        document: { token: 'a', name: 'א.docx', writable: true },
+        caret: anchor,
+      }),
+    );
     h.keeper.setDocument({ token: 'a', name: 'א.docx', writable: true });
     await h.tick(0);
 
-    expect(last(h.persisted).caret).toEqual(anchor);
+    expect(lastEntry(h.persisted)?.caret).toEqual(anchor);
   });
 });
 
@@ -571,5 +587,81 @@ describe('flush', () => {
 
     expect(h.persisted).toHaveLength(0);
     expect(h.drafts).toHaveLength(0);
+  });
+});
+
+/**
+ * `hasUnwrittenWork` — השער שמאפשר ל„טאב נרדם” להיות בטוח.
+ *
+ * ## למה הבדיקות האלה קיימות
+ *
+ * שחרור המנוע של טאב ברקע (App.vue, `sleepTab`) מוחק מהזיכרון את כל מה
+ * שהמסמך מחזיק. מה שמתיר אותו הוא התשובה `false` כאן — ההבטחה שכל מה שנמחק
+ * ניתן לקריאה בחזרה מהטיוטה או מהדיסק. ביקורת מדדה שמוטציה שמוחקת את השער
+ * הזה מ-`sleepTab` עוברת בירוק את כל בדיקות המעטפת, מפני שהכפיל של רכז
+ * השמירה שם לעולם אינו „מלוכלך”. לכן הן כאן, על הדבר עצמו.
+ *
+ * שלושת המסלולים הם שלוש התשובות האפשריות של כתיבת הטיוטה: נכתבה, לא נכתבה,
+ * ונכתבה אך העבודה המשיכה.
+ */
+describe('hasUnwrittenWork', () => {
+  it('מסמך נקי — אין עבודה באוויר', () => {
+    const h = harness();
+
+    expect(h.keeper.hasUnwrittenWork).toBe(false);
+  });
+
+  it('עריכה שטרם נכתבה לטיוטה — יש', async () => {
+    const h = harness();
+    h.dirty = true;
+    h.keeper.noteChange();
+
+    expect(h.keeper.hasUnwrittenWork, 'ההשהיה עוד לא הבשילה').toBe(true);
+  });
+
+  it('אחרי `flush` שכתב את הטיוטה — אין', async () => {
+    const h = harness();
+    h.dirty = true;
+    h.keeper.noteChange();
+
+    await h.keeper.flush();
+
+    expect(h.drafts.length, 'הטיוטה אכן נכתבה').toBe(1);
+    expect(h.keeper.hasUnwrittenWork).toBe(false);
+  });
+
+  it('טיוטה שלא נכתבה — נשאר „יש”, וזה מה שמונע שחרור מנוע', async () => {
+    // המסלול שמציל מסמך גדול מהמכסה: הוא לעולם לא יירדם, וישלם בזיכרון
+    // במקום בעבודה. אותה תשובה בדיוק גם לכשל גשר (`failed`).
+    for (const result of ['too-large', 'failed'] as const) {
+      const h = harness();
+      h.writeResult = result;
+      h.dirty = true;
+      h.keeper.noteChange();
+
+      await h.keeper.flush();
+
+      expect(h.keeper.hasUnwrittenWork, result).toBe(true);
+    }
+  });
+
+  it('עריכה נוספת אחרי טיוטה מוצלחת — חוזר ל„יש”', async () => {
+    const h = harness();
+    h.dirty = true;
+    h.keeper.noteChange();
+    await h.keeper.flush();
+
+    h.keeper.noteChange();
+
+    expect(h.keeper.hasUnwrittenWork).toBe(true);
+  });
+
+  it('מסמך שנשמר לדיסק — אין, גם אם משהו זז מאז', async () => {
+    // שני התנאים ולא אחד: מונה השינויים לבדו זז גם מתזוזת סמן במסמך שנשמר.
+    const h = harness();
+    h.dirty = false;
+    h.keeper.noteChange();
+
+    expect(h.keeper.hasUnwrittenWork).toBe(false);
   });
 });

@@ -15,7 +15,7 @@
  */
 import { openApp, createReport } from './harness.mjs';
 
-const PORT = 9365;
+const PORT = Number(process.env.QA_PORT ?? 9365);
 const report = createReport('לשונית „הפניות”');
 
 const log = (...a) => console.log(...a);

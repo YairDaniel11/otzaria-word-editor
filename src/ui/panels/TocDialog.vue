@@ -18,7 +18,8 @@
         <button
           type="button"
           class="td-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את הגדרות תוכן העניינים"
           @click="$emit('close')"
         >

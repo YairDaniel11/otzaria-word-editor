@@ -15,7 +15,8 @@
         <button
           type="button"
           class="dd-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את ברירות המחדל של המסמך"
           @click="$emit('close')"
         >

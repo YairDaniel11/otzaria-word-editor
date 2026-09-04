@@ -14,7 +14,8 @@
         <button
           type="button"
           class="hd-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את מרחק הכותרת מקצה הדף"
           @click="$emit('close')"
         >

@@ -51,9 +51,8 @@ type Surface =
   /** אזור המסמך — התפריט שלנו, והסמן זז ללחיצה. */
   | 'document'
   /**
-   * התפריט נפתח, אבל **הסמן אינו זז**: הרצועה המוסתרת במצב מיקוד. שם אין
-   * טקסט למקם בו סמן, ולחיצה מסונתזת הייתה נוחתת על כפתור של הרצועה ומפעילה
-   * אותו — „מסמך חדש” שרץ מלחיצה ימנית הוא מסמך פתוח שנעלם.
+   * התפריט נפתח, אבל **הסמן אינו זז**: אין נקודה שנלחצה. זה המסלול של פתיחה
+   * מהמקלדת (`openAtCaret`), שם העוגן הוא מלבן הסמן ולא לחיצה.
    */
   | 'menu-only'
   /**
@@ -69,12 +68,17 @@ export interface ContextMenuDeps {
   superdoc: Ref<SuperDoc | null>;
   /** האם היעד בתוך אזור המסמך. אותה פונקציה שהקיצורים משתמשים בה. */
   isDocumentSurface: (target: EventTarget | null) => boolean;
-  /** שורש המעטפת — נדרש למצב מיקוד, ראו `surfaceOf`. */
-  shell: Ref<HTMLElement | null>;
-  isFocusMode: Ref<boolean>;
   isModalOpen: () => boolean;
   runAction: (action: ShellAction) => boolean;
   report: CommandReporter;
+  /**
+   * המילה שבדיקת האיות סימנה מתחת לנקודה, או `null`. מגיעה משכבת הסימון
+   * (ui/shell/SpellingOverlay.vue), שהיא היחידה שיודעת מה היא ציירה ואיפה —
+   * ולא מ-hit-test על ה-DOM של המנוע, שאסור (tests/unit/engine-boundaries.test.ts).
+   */
+  misspelledWordAt?: (at: MenuPoint) => string | null;
+  /** „הוסף למילון”. נקראת עם המילה שהפריט נבנה עליה. */
+  addToDictionary?: (word: string) => void;
 }
 
 export interface ContextMenuController {
@@ -226,14 +230,11 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
     if (deps.isDocumentSurface(target)) return 'document';
     if (isTextEntryTarget(target)) return 'native';
 
-    // במצב מיקוד הפסים מוסתרים (`opacity:0; pointer-events:none`) אך שומרים על
-    // הפריסה, ולכן הרצועה העליונה נקראת למשתמש כמסמך. התפריט כן נפתח שם — אבל
-    // `menu-only`, כלומר בלי להזיז את הסמן: מתחת לנקודה יושבת הרצועה, ולא
-    // טקסט. הרצועה גם חוזרת ל-`pointer-events: auto` ברגע שהיא נחשפת בריחוף.
-    if (deps.isFocusMode.value) {
-      const shell = deps.shell.value;
-      if (shell && target instanceof Node && shell.contains(target)) return 'menu-only';
-    }
+    /* היה כאן ענף למצב מיקוד: הפסים הוסתרו ב-`opacity` ושמרו על מקומם, ולכן
+       הרצועה המוסתרת נקראה למשתמש כמסמך — ולחיצה ימנית שם קיבלה תפריט בלי
+       הזזת סמן. מאז הפסים יוצאים מהזרימה (App.vue, „מצב מיקוד” ב-`<style>`),
+       הרצועה הזאת **היא** אזור המסמך, והשאלה נענית שורה אחת למעלה. פס שנחשף
+       בריחוף חוזר להיות מה שהוא בכל מצב אחר: רצועה, ובה אין תפריט. */
     return 'blocked';
   }
 
@@ -338,6 +339,9 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
       hasDocument: capabilities.available,
       hasRange: selection.hasRange,
       storyType: storyTypeOf(selection.story),
+      // נקרא כאן ולא לפני ההמתנות: הזזת הסמן אינה משנה טקסט ואינה מזיזה
+      // סימון, וקריאה מאוחרת מקבלת את המדידה העדכנית ביותר.
+      misspelledWord: deps.misspelledWordAt?.(at) ?? null,
       can: (question: DocCapabilityQuestion) => capabilities.can(question),
     });
     // מקטעים ריקים (למשל המסמך עדיין נטען) הם „אין מה להציג”, לא „תפריט פתוח
@@ -416,7 +420,7 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
 
   /**
    * הרצה. פקודות מנוע כבר רצו בפקד עצמו (ContextMenuButton), ולכן כאן נשארו
-   * שני הסוגים האחרים. `focusDocument` לפניהם: הוא קורא
+   * שלושת הסוגים האחרים. `focusDocument` לפניהם: הוא קורא
    * `focus({restoreSelection:true})`, וזה מה שמחזיר את המסמך למצב שבו הפעולה
    * מתייחסת לבחירה שהתפריט נפתח עליה.
    */
@@ -426,6 +430,11 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
 
     if (entry.run.kind === 'action') {
       deps.runAction(entry.run.action);
+      return;
+    }
+
+    if (entry.run.kind === 'dictionary') {
+      deps.addToDictionary?.(entry.run.word);
       return;
     }
 

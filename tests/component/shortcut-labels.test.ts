@@ -11,31 +11,58 @@ import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
 import InsertTab from '../../src/ui/ribbon/tabs/InsertTab.vue';
 import ViewTab from '../../src/ui/ribbon/tabs/ViewTab.vue';
 import { SHORTCUTS, shortcutLabel } from '../../src/ui/shortcuts/registry';
-import { autoUnmount, mountUi, settle } from './harness';
+import { autoUnmount, mountUi, settle, tipMessage, tipOf } from './harness';
 
 autoUnmount();
 
 describe('תווית הקיצור בכפתור', () => {
-  it('התווית נשלפת מהרשימה', () => {
+  it('התווית נשלפת מהרשימה, ויושבת בשדה משלה', () => {
     const wrapper = mount(RibbonButton, {
       props: { label: 'שמור', shortcutId: 'save' },
     });
 
-    expect(wrapper.attributes('title')).toBe('שמור (Ctrl+S)');
+    // שדה נפרד, ולא סוגריים בסוף מחרוזת: הכרטיס מצייר אותו כשבשבת מקשים,
+    // ובדיקה שנעולה על הפורמט של הסוגריים הייתה נשברת מכל שינוי עיצובי.
+    expect(wrapper.attributes('data-tip-title')).toBe('שמור');
+    expect(wrapper.attributes('data-tip-shortcut')).toBe('Ctrl+S');
   });
 
-  it('tooltip מפורש קודם ל-label, והצירוף נלווה אליו', () => {
+  it('הצירוף נכנס לשם הנגיש של כפתור אייקון — שם אין דרך אחרת לדעת אותו', () => {
+    const wrapper = mount(RibbonButton, {
+      props: { icon: 'save', tooltip: 'שמור', shortcutId: 'save' },
+    });
+
+    expect(wrapper.attributes('aria-label')).toBe('שמור (Ctrl+S)');
+    // `title` הוא מה שצייר טולטיפ שני, אפור, מעל הכרטיס. הוא אינו חוזר.
+    expect(wrapper.attributes('title')).toBeUndefined();
+  });
+
+  it('כפתור עם תווית גלויה אינו מקבל aria-label שדורס אותה', () => {
+    const wrapper = mount(RibbonButton, {
+      props: { label: 'שמור', variant: 'large', shortcutId: 'save' },
+    });
+
+    // השם הנגיש מגיע מהתוכן. `aria-label` כאן היה מוסיף „(Ctrl+S)” כרעש,
+    // ושובר שליטה קולית שמצפה שהשם יהיה מה שכתוב על הכפתור.
+    expect(wrapper.attributes('aria-label')).toBeUndefined();
+    expect(wrapper.text()).toContain('שמור');
+    expect(wrapper.attributes('data-tip-shortcut')).toBe('Ctrl+S');
+  });
+
+  it('tooltip מפורש יורד להסבר, והתווית נשארת הכותרת', () => {
     const wrapper = mount(RibbonButton, {
       props: { label: 'שמור', tooltip: 'שמירת המסמך', shortcutId: 'save' },
     });
 
-    expect(wrapper.attributes('title')).toBe('שמירת המסמך (Ctrl+S)');
+    expect(wrapper.attributes('data-tip-title')).toBe('שמור');
+    expect(wrapper.attributes('data-tip-desc')).toBe('שמירת המסמך');
   });
 
-  it('כפתור בלי קיצור אינו ממציא סוגריים', () => {
+  it('כפתור בלי קיצור אינו ממציא שבשבת ריקה', () => {
     const wrapper = mount(RibbonButton, { props: { label: 'אודות' } });
 
-    expect(wrapper.attributes('title')).toBe('אודות');
+    expect(wrapper.attributes('data-tip-title')).toBe('אודות');
+    expect(wrapper.attributes('data-tip-shortcut')).toBeUndefined();
   });
 
   it('shortcutLabel מחזירה את מה שברשימה', () => {
@@ -49,16 +76,22 @@ describe('הרצועה מציגה את הצירופים האמיתיים', () =>
   it('„שמור” ו„שמור בשם” מציגים את הצירוף מהרשימה', async () => {
     const { wrapper } = mountUi(FileTab, { props: { hasDocument: true } });
 
-    const titles = wrapper.findAll('button').map((button) => button.attributes('title'));
+    const pairs = wrapper
+      .findAll('button')
+      .map((button) => `${tipMessage(button)} | ${tipOf(button).shortcut}`);
 
-    expect(titles).toContain('שמירת שינויים במסמך (Ctrl+S)');
-    expect(titles).toContain('שמירת המסמך כקובץ חדש (Ctrl+Shift+S)');
-    expect(titles).toContain('הדפסת המסמך (Ctrl+P)');
+    expect(pairs).toContain('שמירת שינויים במסמך | Ctrl+S');
+    expect(pairs).toContain('שמירת המסמך כקובץ חדש | Ctrl+Shift+S');
+    expect(pairs).toContain('הדפסת המסמך | Ctrl+P');
   });
 
-  it('אין באף לשונית tooltip עם צירוף שאינו ברשימה', async () => {
+  it('אין באף לשונית צירוף שאינו ברשימה', async () => {
     // הבדיקה רצה על כל הלשוניות שיש בהן קיצור, ולא על אחת: התוויות שהיו
     // שקריות ישבו דווקא ב„בית”.
+    //
+    // מאז שהצירוף יושב ב-`data-tip-shortcut` אין כאן עוד ניחוש: קודם נשלפו
+    // סוגריים מסוף ה-`title` ונדרש סינון („הוספת תמונה מקובץ (PNG או JPEG)”
+    // אינו צירוף), והיום כל מה שבשדה הזה *מתיימר* להיות צירוף — ולכן נבדק.
     const labels = new Set(SHORTCUTS.map((shortcut) => shortcut.label));
     const tabs = [FileTab, HomeTab, InsertTab, ViewTab];
     let checked = 0;
@@ -68,13 +101,10 @@ describe('הרצועה מציגה את הצירופים האמיתיים', () =>
       await settle();
 
       for (const button of wrapper.findAll('button')) {
-        const title = button.attributes('title') ?? '';
-        const match = /\(([^)]+)\)$/.exec(title);
-        // סוגריים בסוף אינם בהכרח קיצור: „הוספת תמונה מקובץ (PNG או JPEG)”.
-        // נבדק רק מה שמתיימר להיות צירוף מקשים.
-        if (!match || !/^(?:Ctrl|Alt|Shift|Esc|F\d)/i.test(match[1]!)) continue;
+        const shortcut = tipOf(button).shortcut;
+        if (!shortcut) continue;
         checked += 1;
-        expect(labels, title).toContain(match[1]);
+        expect(labels, `${tipOf(button).title}: ${shortcut}`).toContain(shortcut);
       }
     }
 

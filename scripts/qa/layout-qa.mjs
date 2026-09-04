@@ -16,7 +16,7 @@
  */
 import { openApp, createReport } from './harness.mjs';
 
-const PORT = 9364;
+const PORT = Number(process.env.QA_PORT ?? 9364);
 const only = process.argv.slice(2).filter((a) => !a.startsWith('-'));
 const wants = (stage) => only.length === 0 || only.includes(stage);
 
