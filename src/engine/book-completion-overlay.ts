@@ -54,6 +54,7 @@ import {
   type SectionWordCache,
 } from './book-completion';
 import { matchStaticCompletion, loadStaticSources } from './static-completion';
+import { matchCommunityWikiPhrases, loadCommunityWikiPhrases } from './community-wiki-phrases';
 import { loadAcronymDictionary } from './acronym-dictionary';
 import {
   findOpenTagToken,
@@ -542,6 +543,29 @@ export function installBookCompletion(
     const staticMatch = staticSources ? matchStaticCompletion(snapshot, staticSources) : null;
     if (staticMatch) {
       const ghostText = normalizeSelectedText(staticMatch.text);
+      if (ghostText !== '') {
+        suggestion = {
+          kind: 'suggesting',
+          ghostText,
+          insertText: ghostText,
+          replaceStart: snapshot.replaceStart,
+          cursorOffset: snapshot.cursorOffset,
+          blockId: snapshot.blockId,
+          story: snapshot.story,
+          continueFrom: null,
+        };
+        showGhost(ghostText);
+        return;
+      }
+    }
+
+    // שכבה נוספת — ר' community-wiki-phrases.ts. עצמאית לגמרי מהשכבה
+    // הקודמת: נטענת רק אם גם היא לא מצאה התאמה.
+    const communityCache = await loadCommunityWikiPhrases();
+    if (token !== evalToken || disposed) return;
+    const communityMatch = communityCache ? matchCommunityWikiPhrases(snapshot, communityCache) : null;
+    if (communityMatch) {
+      const ghostText = normalizeSelectedText(communityMatch.text);
       if (ghostText !== '') {
         suggestion = {
           kind: 'suggesting',

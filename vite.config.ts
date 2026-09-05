@@ -5,6 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { TORAH_DICTIONARY_FILE, TORAH_DICTIONARY_GLOBAL } from './src/engine/spellcheck';
 import { ACRONYMS_FILE, ACRONYMS_GLOBAL } from './src/engine/acronyms-constants';
 import { STATIC_COMPLETION_FILE, STATIC_COMPLETION_GLOBAL } from './src/engine/static-completion-constants';
+import {
+  COMMUNITY_WIKI_PHRASES_FILE,
+  COMMUNITY_WIKI_PHRASES_GLOBAL,
+} from './src/engine/community-wiki-phrases-constants';
 import { patchBlankDocumentXml, patchBlankStylesXml } from './src/engine/blank-document';
 import { deriveHebrewBlankDocx } from './scripts/blank-docx';
 
@@ -381,6 +385,36 @@ function staticCompletionAsset(): Plugin {
   };
 }
 
+/**
+ * ביטויים תלמודיים מורחבים — ויקישיבה/ויקיסוגיה (`src/data/talmudic-phrases-community-wikis.json`).
+ * נכס נפרד מ-`staticCompletionAsset` בכוונה, לא רק מסיבת גודל: ר' סעיף
+ * הרישוי הפתוח ב-THIRD_PARTY_NOTICES.md.
+ */
+function communityWikiPhrasesAsset(): Plugin {
+  const SOURCE = fileURLToPath(new URL('./src/data/talmudic-phrases-community-wikis.json', import.meta.url));
+
+  function build(): string {
+    const phrases = JSON.parse(readFileSync(SOURCE, 'utf8')) as unknown;
+    return `window.${COMMUNITY_WIKI_PHRASES_GLOBAL} = ${JSON.stringify(phrases)};\n`;
+  }
+
+  return {
+    name: 'otzaria-community-wiki-phrases',
+
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!req.url || req.url.split('?')[0] !== `/${COMMUNITY_WIKI_PHRASES_FILE}`) return next();
+        res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+        res.end(build());
+      });
+    },
+
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: COMMUNITY_WIKI_PHRASES_FILE, source: build() });
+    },
+  };
+}
+
 const BLANK_DOCX_MODULE = 'virtual:otzaria-blank-docx';
 
 /**
@@ -411,6 +445,7 @@ export default defineConfig({
     torahDictionaryAsset(),
     acronymsAsset(),
     staticCompletionAsset(),
+    communityWikiPhrasesAsset(),
     inlineEngineWorkers(),
     deferredEntry(),
   ],
