@@ -54,6 +54,7 @@ import {
   type SectionWordCache,
 } from './book-completion';
 import { matchStaticCompletion, loadStaticSources } from './static-completion';
+import { loadAcronymDictionary } from './acronym-dictionary';
 import {
   findOpenTagToken,
   findBookNameInQuery,
@@ -547,6 +548,33 @@ export function installBookCompletion(
           ghostText,
           insertText: ghostText,
           replaceStart: snapshot.replaceStart,
+          cursorOffset: snapshot.cursorOffset,
+          blockId: snapshot.blockId,
+          story: snapshot.story,
+          continueFrom: null,
+        };
+        showGhost(ghostText);
+        return;
+      }
+    }
+
+    // שכבה אחרונה — ראשי תיבות. שונה מבנית משתי הקודמות: מתאימה **מילה
+    // שלמה שכבר הוקלדה** (הראשי תיבות עצמם, כולל הגרשיים — WORD_INNER
+    // תופס אותם כמילה אחת) ומציעה את הפירוש שלה, לא ממשיכה טקסט חלקי.
+    // לכן הטריגר הוא `partialWord === ''` (הסמן בגבול מילה) והמילה
+    // הקודמת שהושלמה, לא contextLen כמו בשתי השכבות למעלה.
+    if (snapshot.partialWord === '' && snapshot.precedingWords.length > 0) {
+      const acronymDictionary = await loadAcronymDictionary();
+      if (token !== evalToken || disposed) return;
+      const lastWord = snapshot.precedingWords[snapshot.precedingWords.length - 1]!;
+      const expansion = acronymDictionary?.lookup(lastWord) ?? null;
+      if (expansion) {
+        const ghostText = ` ${expansion}`;
+        suggestion = {
+          kind: 'suggesting',
+          ghostText,
+          insertText: ghostText,
+          replaceStart: snapshot.cursorOffset,
           cursorOffset: snapshot.cursorOffset,
           blockId: snapshot.blockId,
           story: snapshot.story,
